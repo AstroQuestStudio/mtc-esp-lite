@@ -1,6 +1,6 @@
--- Infinite Yield original ESP + compact labels, v4.1.0.
+-- Infinite Yield original ESP + compact labels, v4.2.0.
 -- Original: EdgeIY/infiniteyield (MIT), see LICENSE-InfiniteYield.txt.
--- Custom: short ally names; compact enemy health/team/range; collision-managed labels.
+-- Custom: original hitboxes; nearest-first label budget; one stable camera-center focus; no leader lines.
 -- Stop previous MTC Volumes instances, including their reversible graphics mode.
 pcall(function()
     local player = game:GetService("Players").LocalPlayer
@@ -24,6 +24,7 @@ if IY_LOADED and not _G.IY_DEBUG then
     -- Let old RenderStepped callbacks observe the removed ESP folders and disconnect.
     RunService.RenderStepped:Wait()
     task.wait()
+local compactFocusedPlayer
 local function compactESPIsAlly(plr)
     if plr.Team and Players.LocalPlayer.Team and not plr.Neutral and not Players.LocalPlayer.Neutral then
         return plr.Team == Players.LocalPlayer.Team
@@ -41,136 +42,132 @@ local function compactESPText(plr, humanoid, distance)
         health = math.max(0, math.min(100, math.floor(humanoid.Health / humanoid.MaxHealth * 100 + 0.5)))
     end
     local range = type(distance) == "number" and distance >= 1000 and string.format("%.1fk", distance / 1000) or tostring(distance)
-    return string.format('%s | H%d%% | <font color="%s">E</font> | %s st', name, health, hex, range)
+    local healthText = (health < 100 or compactFocusedPlayer == plr) and string.format(" | H%d%%", health) or ""
+    return string.format('%s%s | <font color="%s">E</font> | %s st', name, healthText, hex, range)
 end
 
--- Shared, screen-space label placement. The original body adornments are untouched.
+-- Keep all original hitboxes. Spend a small, fixed budget on useful text only.
 if type(IY_COMPACT_LABELS_STOP) == "function" then pcall(IY_COMPACT_LABELS_STOP) end
 local compactLabels = {}
-local layoutConnection, labelCanvas
-local layoutElapsed = 0.08
+local layoutConnection
+local layoutElapsed, layoutClock = 0.08, 0
+local pendingFocus, pendingSince
+local labelPolicy = {enemies = 6, allies = 2, allyRange = 450, farRange = 1500, farLimit = 2}
 local function stopCompactLayout()
     if layoutConnection then layoutConnection:Disconnect(); layoutConnection = nil end
-    for _, item in pairs(compactLabels) do
-        item.destroyConnection:Disconnect()
-    end
+    for _, item in pairs(compactLabels) do item.destroyConnection:Disconnect() end
     compactLabels = {}
-    if labelCanvas then labelCanvas:Destroy(); labelCanvas = nil end
+    compactFocusedPlayer, pendingFocus = nil, nil
 end
 IY_COMPACT_LABELS_STOP = stopCompactLayout
 
 local function layoutCompactLabels(dt)
+    layoutClock = layoutClock + dt
     layoutElapsed = layoutElapsed + dt
     if layoutElapsed < 0.08 then return end
     layoutElapsed = 0
     local camera = workspace.CurrentCamera
     local root = Players.LocalPlayer.Character and getRoot(Players.LocalPlayer.Character)
-    local visible = {}
+    local enemies, allies = {}, {}
+    local focusCandidate, oldFocus
+    local radius = camera and math.max(36, math.min(90, math.min(camera.ViewportSize.X, camera.ViewportSize.Y) * 0.12)) or 90
     for plr, item in pairs(compactLabels) do
         item.billboard.Enabled = false
-        item.line.Visible, item.dot.Visible = false, false
         local head = item.billboard.Adornee
         if ESPenabled and camera and root and head and head.Parent then
             local point, onScreen = camera:WorldToViewportPoint(head.Position)
             if onScreen and point.Z > 0 then
                 item.x, item.y = point.X, point.Y
-                item.distance = (root.Position - head.Position).Magnitude
+                local targetRoot = plr.Character and getRoot(plr.Character)
+                item.distance = (root.Position - (targetRoot or head).Position).Magnitude
                 item.ally = compactESPIsAlly(plr)
-                item.label.TextSize = item.ally and 16 or (item.distance >= 1500 and 16 or 20)
-                local measured = item.label.TextBounds
-                local plain = item.label.Text:gsub("<[^>]+>", "")
-                item.width = math.max(32, math.ceil(measured and measured.X > 0 and measured.X or #plain * item.label.TextSize * 0.6) + 8)
-                item.width = math.min(item.width, math.max(32, camera.ViewportSize.X - 16))
-                table.insert(visible, item)
+                local dx, dy = point.X - camera.ViewportSize.X * 0.5, point.Y - camera.ViewportSize.Y * 0.5
+                item.aimDistance = dx * dx + dy * dy
+                if item.ally then
+                    if item.distance <= labelPolicy.allyRange then table.insert(allies, item) end
+                else
+                    table.insert(enemies, item)
+                    if plr == compactFocusedPlayer and item.aimDistance <= (radius * 1.3) ^ 2 then oldFocus = item end
+                    if item.aimDistance <= radius * radius and (not focusCandidate or item.aimDistance < focusCandidate.aimDistance
+                        or (item.aimDistance == focusCandidate.aimDistance and item.distance < focusCandidate.distance)) then
+                        focusCandidate = item
+                    end
+                end
             end
         end
     end
-    table.sort(visible, function(a, b)
-        if a.ally ~= b.ally then return not a.ally end
-        if a.distance ~= b.distance then return a.distance < b.distance end
-        return a.player.UserId < b.player.UserId
-    end)
+    -- A small dwell and wider release radius avoid switching focus every frame.
+    if oldFocus and (not focusCandidate or focusCandidate.aimDistance >= oldFocus.aimDistance * 0.55) then focusCandidate = oldFocus end
+    if not oldFocus then compactFocusedPlayer = nil end
+    if focusCandidate and focusCandidate.player ~= compactFocusedPlayer then
+        if pendingFocus ~= focusCandidate.player then pendingFocus, pendingSince = focusCandidate.player, layoutClock end
+        if layoutClock - pendingSince >= 0.18 then compactFocusedPlayer = pendingFocus; pendingFocus = nil end
+    else
+        pendingFocus = nil
+    end
+
+    local function nearest(a, b)
+        return a.distance < b.distance or (a.distance == b.distance and a.player.UserId < b.player.UserId)
+    end
+    table.sort(enemies, nearest); table.sort(allies, nearest)
+    local selected, selectedPlayers = {}, {}
+    local enemyCount, farCount = 0, 0
+    local function selectEnemy(item)
+        if not item or selectedPlayers[item.player] then return end
+        table.insert(selected, item); selectedPlayers[item.player] = true
+        enemyCount = enemyCount + 1
+        if item.distance > labelPolicy.farRange then farCount = farCount + 1 end
+    end
+    if compactFocusedPlayer then
+        for _, item in ipairs(enemies) do if item.player == compactFocusedPlayer then selectEnemy(item); break end end
+    end
+    for _, item in ipairs(enemies) do
+        if enemyCount >= labelPolicy.enemies then break end
+        if item.distance <= labelPolicy.farRange or farCount < labelPolicy.farLimit then selectEnemy(item) end
+    end
+    for i = 1, math.min(#allies, labelPolicy.allies) do table.insert(selected, allies[i]) end
+
     local occupied = {}
-    for _, item in ipairs(visible) do
-        local w, h = item.width, 22
-        local baseX, baseY = item.x, item.y - 24
+    for _, item in ipairs(selected) do
+        item.label.TextSize = item.ally and 16 or (item.distance > labelPolicy.farRange and 16 or 20)
+        local measured = item.label.TextBounds
+        local plain = item.label.Text:gsub("<[^>]+>", "")
+        local w = math.max(32, math.ceil(measured and measured.X > 0 and measured.X or #plain * item.label.TextSize * 0.6) + 8)
+        local h = math.max(22, math.ceil(measured and measured.Y or 0) + 2)
         local chosen
         local function try(dx, row)
-            local x, y = baseX + dx - w * 0.5, baseY + row * 25 - h * 0.5
+            local x, y = item.x + dx - w * 0.5, item.y - 24 + row * (h + 3) - h * 0.5
             local top = math.min(110, camera.ViewportSize.Y * 0.18)
             if x < 8 or x + w > camera.ViewportSize.X - 8 or y < top or y + h > camera.ViewportSize.Y - 20 then return false end
             for _, rect in ipairs(occupied) do
                 if x < rect.x + rect.w + 6 and x + w + 6 > rect.x and y < rect.y + rect.h + 3 and y + h + 3 > rect.y then return false end
             end
-            chosen = {x = x, y = y, w = w, h = h, dx = dx, row = row}
+            chosen = {x = x, y = y, w = w, h = h}
             return true
         end
-        try(0, 0)
-        if not chosen and item.lastDX then try(item.lastDX, item.lastRow) end
-        if not chosen then
-            for _, column in ipairs({0, -1, 1, -2, 2}) do
-                local dx = column * math.max(w + 14, 220)
-                for step = 0, 32 do
-                    local row = step == 0 and 0 or (step % 2 == 1 and -math.ceil(step / 2) or step / 2)
-                    if try(dx, row) then break end
-                end
-                if chosen then break end
-            end
+        -- Only local adjustments: never move a horizon label into the foreground.
+        for _, row in ipairs({0, -1, 1}) do
+            for _, dx in ipairs({0, -12, 12}) do if try(dx, row) then break end end
+            if chosen then break end
         end
         if chosen then
-            item.lastDX, item.lastRow = chosen.dx, chosen.row
             table.insert(occupied, chosen)
             item.billboard.Size = UDim2.new(0, w, 0, h)
             local cx, cy = chosen.x + w * 0.5, chosen.y + h * 0.5
             item.billboard.SizeOffset = Vector2.new((cx - item.x) / w, (item.y - cy) / h)
             item.billboard.Enabled = true
-            local moved = math.abs(chosen.dx) > 1 or chosen.row ~= 0
-            if moved then
-                -- Leader ends at the nearest edge of the moved text's rectangle.
-                local ex = math.max(chosen.x, math.min(chosen.x + w, item.x))
-                local ey = math.max(chosen.y, math.min(chosen.y + h, item.y))
-                local dx, dy = ex - item.x, ey - item.y
-                item.line.Position = UDim2.fromOffset((item.x + ex) * 0.5, (item.y + ey) * 0.5)
-                item.line.Size = UDim2.fromOffset(math.sqrt(dx * dx + dy * dy), 1)
-                item.line.Rotation = math.deg(math.atan2(dy, dx))
-                item.line.BackgroundColor3 = item.player.TeamColor.Color
-                item.line.Visible = true
-                item.dot.Position = UDim2.fromOffset(item.x, item.y)
-                item.dot.BackgroundColor3 = item.player.TeamColor.Color
-                item.dot.Visible = true
-            end
         end
-        -- If the viewport is truly full, keep the body's boxes and omit the extra
-        -- text rather than forcing another overlapping label into the same space.
+        -- An extra overlapping label is omitted; its original body boxes remain.
     end
 end
 
 local function registerCompactLabel(plr, holder, billboard, label)
-    if not labelCanvas then
-        labelCanvas = Instance.new("ScreenGui")
-        labelCanvas.Name = "IY_CompactESPLinks"
-        labelCanvas.IgnoreGuiInset = true
-        labelCanvas.ResetOnSpawn = false
-        labelCanvas.Parent = COREGUI
-    end
     local item = {player = plr, billboard = billboard, label = label}
-    local function marker(name, transparency)
-        local frame = Instance.new("Frame")
-        frame.Name = name
-        frame.AnchorPoint = Vector2.new(0.5, 0.5)
-        frame.BorderSizePixel = 0
-        frame.BackgroundTransparency = transparency
-        frame.Visible = false
-        frame.Parent = labelCanvas
-        return frame
-    end
-    item.line, item.dot = marker("Leader", 0.5), marker("Anchor", 0.1)
-    item.dot.Size = UDim2.fromOffset(3, 3)
     compactLabels[plr] = item
     item.destroyConnection = holder.Destroying:Connect(function()
         if compactLabels[plr] == item then compactLabels[plr] = nil end
+        if compactFocusedPlayer == plr then compactFocusedPlayer = nil end
         item.destroyConnection:Disconnect()
-        item.line:Destroy(); item.dot:Destroy()
         if next(compactLabels) == nil then stopCompactLayout() end
     end)
     if not layoutConnection then layoutConnection = RunService.RenderStepped:Connect(layoutCompactLabels) end
@@ -6003,6 +6000,7 @@ function round(num, numDecimalPlaces)
 	return math.floor(num * mult + 0.5) / mult
 end
 
+local compactFocusedPlayer
 local function compactESPIsAlly(plr)
     if plr.Team and Players.LocalPlayer.Team and not plr.Neutral and not Players.LocalPlayer.Neutral then
         return plr.Team == Players.LocalPlayer.Team
@@ -6020,136 +6018,132 @@ local function compactESPText(plr, humanoid, distance)
         health = math.max(0, math.min(100, math.floor(humanoid.Health / humanoid.MaxHealth * 100 + 0.5)))
     end
     local range = type(distance) == "number" and distance >= 1000 and string.format("%.1fk", distance / 1000) or tostring(distance)
-    return string.format('%s | H%d%% | <font color="%s">E</font> | %s st', name, health, hex, range)
+    local healthText = (health < 100 or compactFocusedPlayer == plr) and string.format(" | H%d%%", health) or ""
+    return string.format('%s%s | <font color="%s">E</font> | %s st', name, healthText, hex, range)
 end
 
--- Shared, screen-space label placement. The original body adornments are untouched.
+-- Keep all original hitboxes. Spend a small, fixed budget on useful text only.
 if type(IY_COMPACT_LABELS_STOP) == "function" then pcall(IY_COMPACT_LABELS_STOP) end
 local compactLabels = {}
-local layoutConnection, labelCanvas
-local layoutElapsed = 0.08
+local layoutConnection
+local layoutElapsed, layoutClock = 0.08, 0
+local pendingFocus, pendingSince
+local labelPolicy = {enemies = 6, allies = 2, allyRange = 450, farRange = 1500, farLimit = 2}
 local function stopCompactLayout()
     if layoutConnection then layoutConnection:Disconnect(); layoutConnection = nil end
-    for _, item in pairs(compactLabels) do
-        item.destroyConnection:Disconnect()
-    end
+    for _, item in pairs(compactLabels) do item.destroyConnection:Disconnect() end
     compactLabels = {}
-    if labelCanvas then labelCanvas:Destroy(); labelCanvas = nil end
+    compactFocusedPlayer, pendingFocus = nil, nil
 end
 IY_COMPACT_LABELS_STOP = stopCompactLayout
 
 local function layoutCompactLabels(dt)
+    layoutClock = layoutClock + dt
     layoutElapsed = layoutElapsed + dt
     if layoutElapsed < 0.08 then return end
     layoutElapsed = 0
     local camera = workspace.CurrentCamera
     local root = Players.LocalPlayer.Character and getRoot(Players.LocalPlayer.Character)
-    local visible = {}
+    local enemies, allies = {}, {}
+    local focusCandidate, oldFocus
+    local radius = camera and math.max(36, math.min(90, math.min(camera.ViewportSize.X, camera.ViewportSize.Y) * 0.12)) or 90
     for plr, item in pairs(compactLabels) do
         item.billboard.Enabled = false
-        item.line.Visible, item.dot.Visible = false, false
         local head = item.billboard.Adornee
         if ESPenabled and camera and root and head and head.Parent then
             local point, onScreen = camera:WorldToViewportPoint(head.Position)
             if onScreen and point.Z > 0 then
                 item.x, item.y = point.X, point.Y
-                item.distance = (root.Position - head.Position).Magnitude
+                local targetRoot = plr.Character and getRoot(plr.Character)
+                item.distance = (root.Position - (targetRoot or head).Position).Magnitude
                 item.ally = compactESPIsAlly(plr)
-                item.label.TextSize = item.ally and 16 or (item.distance >= 1500 and 16 or 20)
-                local measured = item.label.TextBounds
-                local plain = item.label.Text:gsub("<[^>]+>", "")
-                item.width = math.max(32, math.ceil(measured and measured.X > 0 and measured.X or #plain * item.label.TextSize * 0.6) + 8)
-                item.width = math.min(item.width, math.max(32, camera.ViewportSize.X - 16))
-                table.insert(visible, item)
+                local dx, dy = point.X - camera.ViewportSize.X * 0.5, point.Y - camera.ViewportSize.Y * 0.5
+                item.aimDistance = dx * dx + dy * dy
+                if item.ally then
+                    if item.distance <= labelPolicy.allyRange then table.insert(allies, item) end
+                else
+                    table.insert(enemies, item)
+                    if plr == compactFocusedPlayer and item.aimDistance <= (radius * 1.3) ^ 2 then oldFocus = item end
+                    if item.aimDistance <= radius * radius and (not focusCandidate or item.aimDistance < focusCandidate.aimDistance
+                        or (item.aimDistance == focusCandidate.aimDistance and item.distance < focusCandidate.distance)) then
+                        focusCandidate = item
+                    end
+                end
             end
         end
     end
-    table.sort(visible, function(a, b)
-        if a.ally ~= b.ally then return not a.ally end
-        if a.distance ~= b.distance then return a.distance < b.distance end
-        return a.player.UserId < b.player.UserId
-    end)
+    -- A small dwell and wider release radius avoid switching focus every frame.
+    if oldFocus and (not focusCandidate or focusCandidate.aimDistance >= oldFocus.aimDistance * 0.55) then focusCandidate = oldFocus end
+    if not oldFocus then compactFocusedPlayer = nil end
+    if focusCandidate and focusCandidate.player ~= compactFocusedPlayer then
+        if pendingFocus ~= focusCandidate.player then pendingFocus, pendingSince = focusCandidate.player, layoutClock end
+        if layoutClock - pendingSince >= 0.18 then compactFocusedPlayer = pendingFocus; pendingFocus = nil end
+    else
+        pendingFocus = nil
+    end
+
+    local function nearest(a, b)
+        return a.distance < b.distance or (a.distance == b.distance and a.player.UserId < b.player.UserId)
+    end
+    table.sort(enemies, nearest); table.sort(allies, nearest)
+    local selected, selectedPlayers = {}, {}
+    local enemyCount, farCount = 0, 0
+    local function selectEnemy(item)
+        if not item or selectedPlayers[item.player] then return end
+        table.insert(selected, item); selectedPlayers[item.player] = true
+        enemyCount = enemyCount + 1
+        if item.distance > labelPolicy.farRange then farCount = farCount + 1 end
+    end
+    if compactFocusedPlayer then
+        for _, item in ipairs(enemies) do if item.player == compactFocusedPlayer then selectEnemy(item); break end end
+    end
+    for _, item in ipairs(enemies) do
+        if enemyCount >= labelPolicy.enemies then break end
+        if item.distance <= labelPolicy.farRange or farCount < labelPolicy.farLimit then selectEnemy(item) end
+    end
+    for i = 1, math.min(#allies, labelPolicy.allies) do table.insert(selected, allies[i]) end
+
     local occupied = {}
-    for _, item in ipairs(visible) do
-        local w, h = item.width, 22
-        local baseX, baseY = item.x, item.y - 24
+    for _, item in ipairs(selected) do
+        item.label.TextSize = item.ally and 16 or (item.distance > labelPolicy.farRange and 16 or 20)
+        local measured = item.label.TextBounds
+        local plain = item.label.Text:gsub("<[^>]+>", "")
+        local w = math.max(32, math.ceil(measured and measured.X > 0 and measured.X or #plain * item.label.TextSize * 0.6) + 8)
+        local h = math.max(22, math.ceil(measured and measured.Y or 0) + 2)
         local chosen
         local function try(dx, row)
-            local x, y = baseX + dx - w * 0.5, baseY + row * 25 - h * 0.5
+            local x, y = item.x + dx - w * 0.5, item.y - 24 + row * (h + 3) - h * 0.5
             local top = math.min(110, camera.ViewportSize.Y * 0.18)
             if x < 8 or x + w > camera.ViewportSize.X - 8 or y < top or y + h > camera.ViewportSize.Y - 20 then return false end
             for _, rect in ipairs(occupied) do
                 if x < rect.x + rect.w + 6 and x + w + 6 > rect.x and y < rect.y + rect.h + 3 and y + h + 3 > rect.y then return false end
             end
-            chosen = {x = x, y = y, w = w, h = h, dx = dx, row = row}
+            chosen = {x = x, y = y, w = w, h = h}
             return true
         end
-        try(0, 0)
-        if not chosen and item.lastDX then try(item.lastDX, item.lastRow) end
-        if not chosen then
-            for _, column in ipairs({0, -1, 1, -2, 2}) do
-                local dx = column * math.max(w + 14, 220)
-                for step = 0, 32 do
-                    local row = step == 0 and 0 or (step % 2 == 1 and -math.ceil(step / 2) or step / 2)
-                    if try(dx, row) then break end
-                end
-                if chosen then break end
-            end
+        -- Only local adjustments: never move a horizon label into the foreground.
+        for _, row in ipairs({0, -1, 1}) do
+            for _, dx in ipairs({0, -12, 12}) do if try(dx, row) then break end end
+            if chosen then break end
         end
         if chosen then
-            item.lastDX, item.lastRow = chosen.dx, chosen.row
             table.insert(occupied, chosen)
             item.billboard.Size = UDim2.new(0, w, 0, h)
             local cx, cy = chosen.x + w * 0.5, chosen.y + h * 0.5
             item.billboard.SizeOffset = Vector2.new((cx - item.x) / w, (item.y - cy) / h)
             item.billboard.Enabled = true
-            local moved = math.abs(chosen.dx) > 1 or chosen.row ~= 0
-            if moved then
-                -- Leader ends at the nearest edge of the moved text's rectangle.
-                local ex = math.max(chosen.x, math.min(chosen.x + w, item.x))
-                local ey = math.max(chosen.y, math.min(chosen.y + h, item.y))
-                local dx, dy = ex - item.x, ey - item.y
-                item.line.Position = UDim2.fromOffset((item.x + ex) * 0.5, (item.y + ey) * 0.5)
-                item.line.Size = UDim2.fromOffset(math.sqrt(dx * dx + dy * dy), 1)
-                item.line.Rotation = math.deg(math.atan2(dy, dx))
-                item.line.BackgroundColor3 = item.player.TeamColor.Color
-                item.line.Visible = true
-                item.dot.Position = UDim2.fromOffset(item.x, item.y)
-                item.dot.BackgroundColor3 = item.player.TeamColor.Color
-                item.dot.Visible = true
-            end
         end
-        -- If the viewport is truly full, keep the body's boxes and omit the extra
-        -- text rather than forcing another overlapping label into the same space.
+        -- An extra overlapping label is omitted; its original body boxes remain.
     end
 end
 
 local function registerCompactLabel(plr, holder, billboard, label)
-    if not labelCanvas then
-        labelCanvas = Instance.new("ScreenGui")
-        labelCanvas.Name = "IY_CompactESPLinks"
-        labelCanvas.IgnoreGuiInset = true
-        labelCanvas.ResetOnSpawn = false
-        labelCanvas.Parent = COREGUI
-    end
     local item = {player = plr, billboard = billboard, label = label}
-    local function marker(name, transparency)
-        local frame = Instance.new("Frame")
-        frame.Name = name
-        frame.AnchorPoint = Vector2.new(0.5, 0.5)
-        frame.BorderSizePixel = 0
-        frame.BackgroundTransparency = transparency
-        frame.Visible = false
-        frame.Parent = labelCanvas
-        return frame
-    end
-    item.line, item.dot = marker("Leader", 0.5), marker("Anchor", 0.1)
-    item.dot.Size = UDim2.fromOffset(3, 3)
     compactLabels[plr] = item
     item.destroyConnection = holder.Destroying:Connect(function()
         if compactLabels[plr] == item then compactLabels[plr] = nil end
+        if compactFocusedPlayer == plr then compactFocusedPlayer = nil end
         item.destroyConnection:Disconnect()
-        item.line:Destroy(); item.dot:Destroy()
         if next(compactLabels) == nil then stopCompactLayout() end
     end)
     if not layoutConnection then layoutConnection = RunService.RenderStepped:Connect(layoutCompactLabels) end
