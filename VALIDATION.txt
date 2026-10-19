@@ -5,10 +5,12 @@ PASS: allies reduced to team-colored 3-character names, automatic relation chang
 PASS: original rebuild path, replacement character and live distance updates
 PASS: espteam uses actual team colors; original noesp callback cleanup
 PASS: in-place Infinite Yield upgrade, old callbacks drained before restart, repeated upgrade cleanup, unavailable-global fallback
-PASS: 46 clustered distant occupants reduced to nearest 2 labels; all boxes kept, no leaders, no foreground migration or text overlap
+PASS: 46 clustered distant occupants reduced to the nearest distance only; all boxes kept, fixed anchors, no leaders or overlapping text
 PASS: fixed 6-enemy/2-nearby-ally budget, focused distant target included, healthy spam removed and damaged health retained
 PASS: closer occupants replace lower priorities; camera-center focus releases/reacquires with dwell and hysteresis
 PASS: priority coordinator and lifecycle connections cleaned up on noesp
+PASS: crowded ally/enemy tags become colored distances; nearest wins over focus; details return after separation without oscillation; font measurements cached
+PASS: distance-only state and renderer connections cleaned up
 PASS: complete script compiled with official Luau 0.743
-Compiled 13 KLOC into 636 KB bytecode (read 0.00s, parse 0.01s, compile 0.03s)
-Behavior/layout checks used Fengari with mocked Roblox APIs. Full original Infinite Yield compiled but was not executed. Native Roblox/Xeno/MTC rendering, actual font metrics, viewport placement and gameplay were NOT tested.
+Compiled 13 KLOC into 639 KB bytecode (read 0.00s, parse 0.01s, compile 0.04s)
+Behavior/layout checks used Fengari with mocked Roblox APIs and font measurements. Full original Infinite Yield compiled but was not executed. Native Roblox/Xeno/MTC rendering, actual font metrics, viewport placement and gameplay were NOT tested.

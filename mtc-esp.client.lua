@@ -1,6 +1,6 @@
--- Infinite Yield original ESP + compact labels, v4.2.0.
+-- Infinite Yield original ESP + compact labels, v4.3.0.
 -- Original: EdgeIY/infiniteyield (MIT), see LICENSE-InfiniteYield.txt.
--- Custom: original hitboxes; nearest-first label budget; one stable camera-center focus; no leader lines.
+-- Custom: original hitboxes; fixed label anchors; crowded text becomes distance only.
 -- Stop previous MTC Volumes instances, including their reversible graphics mode.
 pcall(function()
     local player = game:GetService("Players").LocalPlayer
@@ -25,38 +25,65 @@ if IY_LOADED and not _G.IY_DEBUG then
     RunService.RenderStepped:Wait()
     task.wait()
 local compactFocusedPlayer
+local compactDistanceOnly = {}
 local function compactESPIsAlly(plr)
     if plr.Team and Players.LocalPlayer.Team and not plr.Neutral and not Players.LocalPlayer.Neutral then
         return plr.Team == Players.LocalPlayer.Team
     end
     return plr.TeamColor == Players.LocalPlayer.TeamColor
 end
-local function compactESPText(plr, humanoid, distance)
+local function compactESPText(plr, humanoid, distance, forceDetailed)
     local color = plr.TeamColor.Color
     local function channel(value) return math.max(0, math.min(255, math.floor(value * 255 + 0.5))) end
     local hex = string.format("#%02X%02X%02X", channel(color.R), channel(color.G), channel(color.B))
     local name = string.sub(plr.Name, 1, 3)
+    local range = type(distance) == "number" and distance >= 1000 and string.format("%.1fk", distance / 1000) or tostring(distance)
+    if compactDistanceOnly[plr] and not forceDetailed then
+        return string.format('<font color="%s">%s st</font>', hex, range)
+    end
     if compactESPIsAlly(plr) then return string.format('<font color="%s">%s</font>', hex, name) end
     local health = 0
     if humanoid and humanoid.MaxHealth > 0 then
         health = math.max(0, math.min(100, math.floor(humanoid.Health / humanoid.MaxHealth * 100 + 0.5)))
     end
-    local range = type(distance) == "number" and distance >= 1000 and string.format("%.1fk", distance / 1000) or tostring(distance)
     local healthText = (health < 100 or compactFocusedPlayer == plr) and string.format(" | H%d%%", health) or ""
     return string.format('%s%s | <font color="%s">E</font> | %s st', name, healthText, hex, range)
 end
 
--- Keep all original hitboxes. Spend a small, fixed budget on useful text only.
+-- Fixed anchors only. Crowded text becomes distance; original hitboxes stay intact.
 if type(IY_COMPACT_LABELS_STOP) == "function" then pcall(IY_COMPACT_LABELS_STOP) end
 local compactLabels = {}
 local layoutConnection
 local layoutElapsed, layoutClock = 0.08, 0
 local pendingFocus, pendingSince
 local labelPolicy = {enemies = 6, allies = 2, allyRange = 450, farRange = 1500, farLimit = 2}
+local compactTextService = game:GetService("TextService")
+local function measureCompactLabel(item, text, slot)
+    local size = item.label.TextSize
+    local cached = item[slot]
+    if cached and cached.text == text and cached.size == size then return cached.w, cached.h end
+    local other = item[slot == "normalMeasure" and "displayMeasure" or "normalMeasure"]
+    if other and other.text == text and other.size == size then item[slot] = other; return other.w, other.h end
+    local plain = text:gsub("<[^>]+>", "")
+    local w, h = #plain * size * 0.6, size
+    if compactTextService then
+        local ok, bounds = pcall(function()
+            return compactTextService:GetTextSize(plain, size, item.label.Font, Vector2.new(10000, 1000))
+        end)
+        if ok then w, h = bounds.X, bounds.Y end
+    end
+    w, h = math.max(32, math.ceil(w) + 8), math.max(22, math.ceil(h) + 2)
+    item[slot] = {text = text, size = size, w = w, h = h}
+    return w, h
+end
+local function overlap(a, b)
+    return a.x < b.x + b.w + 6 and a.x + a.w + 6 > b.x and a.y < b.y + b.h + 3 and a.y + a.h + 3 > b.y
+end
 local function stopCompactLayout()
     if layoutConnection then layoutConnection:Disconnect(); layoutConnection = nil end
     for _, item in pairs(compactLabels) do item.destroyConnection:Disconnect() end
     compactLabels = {}
+    compactDistanceOnly = {}
     compactFocusedPlayer, pendingFocus = nil, nil
 end
 IY_COMPACT_LABELS_STOP = stopCompactLayout
@@ -68,11 +95,12 @@ local function layoutCompactLabels(dt)
     layoutElapsed = 0
     local camera = workspace.CurrentCamera
     local root = Players.LocalPlayer.Character and getRoot(Players.LocalPlayer.Character)
-    local enemies, allies = {}, {}
+    local enemies, allies, visibleBodies = {}, {}, {}
     local focusCandidate, oldFocus
     local radius = camera and math.max(36, math.min(90, math.min(camera.ViewportSize.X, camera.ViewportSize.Y) * 0.12)) or 90
     for plr, item in pairs(compactLabels) do
         item.billboard.Enabled = false
+        compactDistanceOnly[plr] = nil
         local head = item.billboard.Adornee
         if ESPenabled and camera and root and head and head.Parent then
             local point, onScreen = camera:WorldToViewportPoint(head.Position)
@@ -83,6 +111,7 @@ local function layoutCompactLabels(dt)
                 item.ally = compactESPIsAlly(plr)
                 local dx, dy = point.X - camera.ViewportSize.X * 0.5, point.Y - camera.ViewportSize.Y * 0.5
                 item.aimDistance = dx * dx + dy * dy
+                table.insert(visibleBodies, item)
                 if item.ally then
                     if item.distance <= labelPolicy.allyRange then table.insert(allies, item) end
                 else
@@ -127,37 +156,52 @@ local function layoutCompactLabels(dt)
     end
     for i = 1, math.min(#allies, labelPolicy.allies) do table.insert(selected, allies[i]) end
 
-    local occupied = {}
+    -- Compare the normal, complete text independently of last frame's short text.
+    -- This prevents a compact/full feedback loop when the crowd is stationary.
     for _, item in ipairs(selected) do
         item.label.TextSize = item.ally and 16 or (item.distance > labelPolicy.farRange and 16 or 20)
-        local measured = item.label.TextBounds
-        local plain = item.label.Text:gsub("<[^>]+>", "")
-        local w = math.max(32, math.ceil(measured and measured.X > 0 and measured.X or #plain * item.label.TextSize * 0.6) + 8)
-        local h = math.max(22, math.ceil(measured and measured.Y or 0) + 2)
-        local chosen
-        local function try(dx, row)
-            local x, y = item.x + dx - w * 0.5, item.y - 24 + row * (h + 3) - h * 0.5
-            local top = math.min(110, camera.ViewportSize.Y * 0.18)
-            if x < 8 or x + w > camera.ViewportSize.X - 8 or y < top or y + h > camera.ViewportSize.Y - 20 then return false end
-            for _, rect in ipairs(occupied) do
-                if x < rect.x + rect.w + 6 and x + w + 6 > rect.x and y < rect.y + rect.h + 3 and y + h + 3 > rect.y then return false end
+        local humanoid = item.player.Character and item.player.Character:FindFirstChildOfClass("Humanoid")
+        item.normalText = compactESPText(item.player, humanoid, math.floor(item.distance), true)
+        local w, h = measureCompactLabel(item, item.normalText, "normalMeasure")
+        item.normalRect = {x = item.x - w * 0.5, y = item.y - 24 - h * 0.5, w = w, h = h}
+        local neighbors = 0
+        for _, body in ipairs(visibleBodies) do
+            if body ~= item and math.abs(body.x - item.x) < 38 and math.abs(body.y - item.y) < 22 then
+                neighbors = neighbors + 1
             end
-            chosen = {x = x, y = y, w = w, h = h}
-            return true
         end
-        -- Only local adjustments: never move a horizon label into the foreground.
-        for _, row in ipairs({0, -1, 1}) do
-            for _, dx in ipairs({0, -12, 12}) do if try(dx, row) then break end end
-            if chosen then break end
+        if neighbors >= 2 then item.crowdedUntil = layoutClock + 0.3 end
+    end
+    for i = 1, #selected do
+        for j = i + 1, #selected do
+            if overlap(selected[i].normalRect, selected[j].normalRect) then
+                selected[i].crowdedUntil = layoutClock + 0.3
+                selected[j].crowdedUntil = layoutClock + 0.3
+            end
         end
-        if chosen then
-            table.insert(occupied, chosen)
+    end
+    -- Where distance tags still overlap, the nearest wins, including over focus.
+    table.sort(selected, nearest)
+    local occupied = {}
+    for _, item in ipairs(selected) do
+        compactDistanceOnly[item.player] = (item.crowdedUntil or 0) > layoutClock
+        local humanoid = item.player.Character and item.player.Character:FindFirstChildOfClass("Humanoid")
+        local text = compactESPText(item.player, humanoid, math.floor(item.distance))
+        local w, h = measureCompactLabel(item, text, "displayMeasure")
+        item.label.Text = text
+        local rect = {x = item.x - w * 0.5, y = item.y - 24 - h * 0.5, w = w, h = h}
+        local blocked = rect.x < 8 or rect.x + w > camera.ViewportSize.X - 8
+            or rect.y < math.min(110, camera.ViewportSize.Y * 0.18) or rect.y + h > camera.ViewportSize.Y - 20
+        for _, placed in ipairs(occupied) do
+            if overlap(rect, placed) then blocked = true; break end
+        end
+        if not blocked then
+            table.insert(occupied, rect)
             item.billboard.Size = UDim2.new(0, w, 0, h)
-            local cx, cy = chosen.x + w * 0.5, chosen.y + h * 0.5
-            item.billboard.SizeOffset = Vector2.new((cx - item.x) / w, (item.y - cy) / h)
+            item.billboard.SizeOffset = Vector2.new(0, 24 / h)
             item.billboard.Enabled = true
         end
-        -- An extra overlapping label is omitted; its original body boxes remain.
+        -- No horizontal offset, no alternate row, no leader line, no moved box.
     end
 end
 
@@ -166,6 +210,7 @@ local function registerCompactLabel(plr, holder, billboard, label)
     compactLabels[plr] = item
     item.destroyConnection = holder.Destroying:Connect(function()
         if compactLabels[plr] == item then compactLabels[plr] = nil end
+        compactDistanceOnly[plr] = nil
         if compactFocusedPlayer == plr then compactFocusedPlayer = nil end
         item.destroyConnection:Disconnect()
         if next(compactLabels) == nil then stopCompactLayout() end
@@ -6001,38 +6046,65 @@ function round(num, numDecimalPlaces)
 end
 
 local compactFocusedPlayer
+local compactDistanceOnly = {}
 local function compactESPIsAlly(plr)
     if plr.Team and Players.LocalPlayer.Team and not plr.Neutral and not Players.LocalPlayer.Neutral then
         return plr.Team == Players.LocalPlayer.Team
     end
     return plr.TeamColor == Players.LocalPlayer.TeamColor
 end
-local function compactESPText(plr, humanoid, distance)
+local function compactESPText(plr, humanoid, distance, forceDetailed)
     local color = plr.TeamColor.Color
     local function channel(value) return math.max(0, math.min(255, math.floor(value * 255 + 0.5))) end
     local hex = string.format("#%02X%02X%02X", channel(color.R), channel(color.G), channel(color.B))
     local name = string.sub(plr.Name, 1, 3)
+    local range = type(distance) == "number" and distance >= 1000 and string.format("%.1fk", distance / 1000) or tostring(distance)
+    if compactDistanceOnly[plr] and not forceDetailed then
+        return string.format('<font color="%s">%s st</font>', hex, range)
+    end
     if compactESPIsAlly(plr) then return string.format('<font color="%s">%s</font>', hex, name) end
     local health = 0
     if humanoid and humanoid.MaxHealth > 0 then
         health = math.max(0, math.min(100, math.floor(humanoid.Health / humanoid.MaxHealth * 100 + 0.5)))
     end
-    local range = type(distance) == "number" and distance >= 1000 and string.format("%.1fk", distance / 1000) or tostring(distance)
     local healthText = (health < 100 or compactFocusedPlayer == plr) and string.format(" | H%d%%", health) or ""
     return string.format('%s%s | <font color="%s">E</font> | %s st', name, healthText, hex, range)
 end
 
--- Keep all original hitboxes. Spend a small, fixed budget on useful text only.
+-- Fixed anchors only. Crowded text becomes distance; original hitboxes stay intact.
 if type(IY_COMPACT_LABELS_STOP) == "function" then pcall(IY_COMPACT_LABELS_STOP) end
 local compactLabels = {}
 local layoutConnection
 local layoutElapsed, layoutClock = 0.08, 0
 local pendingFocus, pendingSince
 local labelPolicy = {enemies = 6, allies = 2, allyRange = 450, farRange = 1500, farLimit = 2}
+local compactTextService = game:GetService("TextService")
+local function measureCompactLabel(item, text, slot)
+    local size = item.label.TextSize
+    local cached = item[slot]
+    if cached and cached.text == text and cached.size == size then return cached.w, cached.h end
+    local other = item[slot == "normalMeasure" and "displayMeasure" or "normalMeasure"]
+    if other and other.text == text and other.size == size then item[slot] = other; return other.w, other.h end
+    local plain = text:gsub("<[^>]+>", "")
+    local w, h = #plain * size * 0.6, size
+    if compactTextService then
+        local ok, bounds = pcall(function()
+            return compactTextService:GetTextSize(plain, size, item.label.Font, Vector2.new(10000, 1000))
+        end)
+        if ok then w, h = bounds.X, bounds.Y end
+    end
+    w, h = math.max(32, math.ceil(w) + 8), math.max(22, math.ceil(h) + 2)
+    item[slot] = {text = text, size = size, w = w, h = h}
+    return w, h
+end
+local function overlap(a, b)
+    return a.x < b.x + b.w + 6 and a.x + a.w + 6 > b.x and a.y < b.y + b.h + 3 and a.y + a.h + 3 > b.y
+end
 local function stopCompactLayout()
     if layoutConnection then layoutConnection:Disconnect(); layoutConnection = nil end
     for _, item in pairs(compactLabels) do item.destroyConnection:Disconnect() end
     compactLabels = {}
+    compactDistanceOnly = {}
     compactFocusedPlayer, pendingFocus = nil, nil
 end
 IY_COMPACT_LABELS_STOP = stopCompactLayout
@@ -6044,11 +6116,12 @@ local function layoutCompactLabels(dt)
     layoutElapsed = 0
     local camera = workspace.CurrentCamera
     local root = Players.LocalPlayer.Character and getRoot(Players.LocalPlayer.Character)
-    local enemies, allies = {}, {}
+    local enemies, allies, visibleBodies = {}, {}, {}
     local focusCandidate, oldFocus
     local radius = camera and math.max(36, math.min(90, math.min(camera.ViewportSize.X, camera.ViewportSize.Y) * 0.12)) or 90
     for plr, item in pairs(compactLabels) do
         item.billboard.Enabled = false
+        compactDistanceOnly[plr] = nil
         local head = item.billboard.Adornee
         if ESPenabled and camera and root and head and head.Parent then
             local point, onScreen = camera:WorldToViewportPoint(head.Position)
@@ -6059,6 +6132,7 @@ local function layoutCompactLabels(dt)
                 item.ally = compactESPIsAlly(plr)
                 local dx, dy = point.X - camera.ViewportSize.X * 0.5, point.Y - camera.ViewportSize.Y * 0.5
                 item.aimDistance = dx * dx + dy * dy
+                table.insert(visibleBodies, item)
                 if item.ally then
                     if item.distance <= labelPolicy.allyRange then table.insert(allies, item) end
                 else
@@ -6103,37 +6177,52 @@ local function layoutCompactLabels(dt)
     end
     for i = 1, math.min(#allies, labelPolicy.allies) do table.insert(selected, allies[i]) end
 
-    local occupied = {}
+    -- Compare the normal, complete text independently of last frame's short text.
+    -- This prevents a compact/full feedback loop when the crowd is stationary.
     for _, item in ipairs(selected) do
         item.label.TextSize = item.ally and 16 or (item.distance > labelPolicy.farRange and 16 or 20)
-        local measured = item.label.TextBounds
-        local plain = item.label.Text:gsub("<[^>]+>", "")
-        local w = math.max(32, math.ceil(measured and measured.X > 0 and measured.X or #plain * item.label.TextSize * 0.6) + 8)
-        local h = math.max(22, math.ceil(measured and measured.Y or 0) + 2)
-        local chosen
-        local function try(dx, row)
-            local x, y = item.x + dx - w * 0.5, item.y - 24 + row * (h + 3) - h * 0.5
-            local top = math.min(110, camera.ViewportSize.Y * 0.18)
-            if x < 8 or x + w > camera.ViewportSize.X - 8 or y < top or y + h > camera.ViewportSize.Y - 20 then return false end
-            for _, rect in ipairs(occupied) do
-                if x < rect.x + rect.w + 6 and x + w + 6 > rect.x and y < rect.y + rect.h + 3 and y + h + 3 > rect.y then return false end
+        local humanoid = item.player.Character and item.player.Character:FindFirstChildOfClass("Humanoid")
+        item.normalText = compactESPText(item.player, humanoid, math.floor(item.distance), true)
+        local w, h = measureCompactLabel(item, item.normalText, "normalMeasure")
+        item.normalRect = {x = item.x - w * 0.5, y = item.y - 24 - h * 0.5, w = w, h = h}
+        local neighbors = 0
+        for _, body in ipairs(visibleBodies) do
+            if body ~= item and math.abs(body.x - item.x) < 38 and math.abs(body.y - item.y) < 22 then
+                neighbors = neighbors + 1
             end
-            chosen = {x = x, y = y, w = w, h = h}
-            return true
         end
-        -- Only local adjustments: never move a horizon label into the foreground.
-        for _, row in ipairs({0, -1, 1}) do
-            for _, dx in ipairs({0, -12, 12}) do if try(dx, row) then break end end
-            if chosen then break end
+        if neighbors >= 2 then item.crowdedUntil = layoutClock + 0.3 end
+    end
+    for i = 1, #selected do
+        for j = i + 1, #selected do
+            if overlap(selected[i].normalRect, selected[j].normalRect) then
+                selected[i].crowdedUntil = layoutClock + 0.3
+                selected[j].crowdedUntil = layoutClock + 0.3
+            end
         end
-        if chosen then
-            table.insert(occupied, chosen)
+    end
+    -- Where distance tags still overlap, the nearest wins, including over focus.
+    table.sort(selected, nearest)
+    local occupied = {}
+    for _, item in ipairs(selected) do
+        compactDistanceOnly[item.player] = (item.crowdedUntil or 0) > layoutClock
+        local humanoid = item.player.Character and item.player.Character:FindFirstChildOfClass("Humanoid")
+        local text = compactESPText(item.player, humanoid, math.floor(item.distance))
+        local w, h = measureCompactLabel(item, text, "displayMeasure")
+        item.label.Text = text
+        local rect = {x = item.x - w * 0.5, y = item.y - 24 - h * 0.5, w = w, h = h}
+        local blocked = rect.x < 8 or rect.x + w > camera.ViewportSize.X - 8
+            or rect.y < math.min(110, camera.ViewportSize.Y * 0.18) or rect.y + h > camera.ViewportSize.Y - 20
+        for _, placed in ipairs(occupied) do
+            if overlap(rect, placed) then blocked = true; break end
+        end
+        if not blocked then
+            table.insert(occupied, rect)
             item.billboard.Size = UDim2.new(0, w, 0, h)
-            local cx, cy = chosen.x + w * 0.5, chosen.y + h * 0.5
-            item.billboard.SizeOffset = Vector2.new((cx - item.x) / w, (item.y - cy) / h)
+            item.billboard.SizeOffset = Vector2.new(0, 24 / h)
             item.billboard.Enabled = true
         end
-        -- An extra overlapping label is omitted; its original body boxes remain.
+        -- No horizontal offset, no alternate row, no leader line, no moved box.
     end
 end
 
@@ -6142,6 +6231,7 @@ local function registerCompactLabel(plr, holder, billboard, label)
     compactLabels[plr] = item
     item.destroyConnection = holder.Destroying:Connect(function()
         if compactLabels[plr] == item then compactLabels[plr] = nil end
+        compactDistanceOnly[plr] = nil
         if compactFocusedPlayer == plr then compactFocusedPlayer = nil end
         item.destroyConnection:Disconnect()
         if next(compactLabels) == nil then stopCompactLayout() end
