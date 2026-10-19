@@ -1,0 +1,7 @@
+PASS: Lua syntax
+PASS: distances, blue allies, red enemies, gray unknown teams
+PASS: category filters, all per-player modes, live team changes
+PASS: range, respawn, seat anchoring, death, absent local character
+PASS: occlusion settings, silhouettes, keyboard toggle, player leave/join
+PASS: repeated launch, complete GUI/marker/connection cleanup
+Environment: Fengari Lua 5.3 with mocked Roblox APIs. Syntax checked with luaparse. Roblox rendering and MTC integration were NOT tested.
