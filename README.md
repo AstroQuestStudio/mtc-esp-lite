@@ -1,4 +1,12 @@
-# MTC ESP Lite v2
+# MTC ESP Lite v2.1
+
+## Correction v2.1 : visibilité des occupants de chars
+
+Option activée par défaut : **Dans un char : visibilité du véhicule**. Pour un joueur assis, les raycasts visent le siège et la racine de son assemblage. Une première collision avec son siège, une pièce du même assemblage physique ou du petit modèle de véhicule déduit est considérée comme dégagée. La coque du char ne rend donc plus systématiquement son équipage sombre. Un mur, le terrain ou un autre véhicule qui intervient avant reste bloquant.
+
+Le modèle est déduit du plus proche ancêtre Model commun au siège et à sa racine physique ; les personnages et modèles dont la diagonale dépasse 250 studs sont exclus. Si aucun modèle fiable n’est obtenu, seule l’identité de l’assemblage et du siège est utilisée. Cela reste une détection générique à vérifier dans MTC ; un véhicule dont toutes les pièces sont indépendantes peut être détecté seulement en partie. Deux points de test ne couvrent pas toute la silhouette d’un char partiellement visible.
+
+Le repère indique **véhicule visible**, pas équipage exposé ou blindage pénétrable. Les boîtes restent celles des personnages. Désactiver cette option rétablit le test tête/torse de v2. Sortir du siège rétablit automatiquement le test du personnage. L’option d’ancrage du repère au siège est indépendante.
 
 ## Nouveautés v2 : boîtes, visibilité et performances
 

@@ -1,4 +1,4 @@
--- MTC ESP Lite v2: focused rewrite of EdgeIY/Infinite Yield's ESP concept.
+-- MTC ESP Lite v2.1: focused rewrite of EdgeIY/Infinite Yield's ESP concept.
 -- Upstream MIT attribution: see LICENSE-InfiniteYield.txt.
 -- Client only. Team/seat detection uses generic Roblox data, not MTC internals.
 local Players = game:GetService("Players")
@@ -17,7 +17,7 @@ end
 
 local settings = {enabled = true, allies = true, enemies = true, unknown = true,
     through = true, silhouettes = false, seat = true, range = 1500,
-    boxes = true, visibleOnly = false, maxMarkers = 24}
+    boxes = true, visibleOnly = false, vehicleLOS = true, maxMarkers = 24}
 local colors = {ally = Color3.fromRGB(65, 156, 255), enemy = Color3.fromRGB(255, 79, 90),
     unknown = Color3.fromRGB(175, 184, 198)}
 local records, connections = {}, {}
@@ -178,7 +178,8 @@ toggle("boxes", "Boîtes des parties du corps")
 toggle("visibleOnly", "Ligne de vue dégagée uniquement")
 toggle("silhouettes", "Silhouettes des personnages")
 toggle("seat", "Ancrer au siège si assis")
-ordered(text(body, "Clair = tête ou torse visible depuis la caméra", 22))
+toggle("vehicleLOS", "Dans un char : visibilité du véhicule")
+ordered(text(body, "Clair = personnage ou véhicule visible", 22))
 ordered(text(body, "Sombre = ligne bloquée ou test en attente", 22))
 local perfNames = {[0] = "NORMAL", [1] = "LÉGER", [2] = "FORT"}
 local perfButton
@@ -324,13 +325,39 @@ local function updateBoxes(r, enabled, color, clear)
     end
 end
 
+local function vehicleModel(seat, assemblyRoot, character)
+    -- Infer only a small common model of physically related parts.
+    -- Never accept Workspace, a map-sized model, or the occupant's character.
+    if not assemblyRoot or assemblyRoot == seat then return nil end
+    local ancestor = seat.Parent
+    for _ = 1, 8 do
+        if not ancestor or ancestor == workspace then return nil end
+        if ancestor:IsA("Model") and assemblyRoot:IsDescendantOf(ancestor) then
+            if ancestor == character or ancestor:FindFirstChildOfClass("Humanoid") then return nil end
+            local ok, size = pcall(function() return ancestor:GetExtentsSize() end)
+            if ok and size.Magnitude <= 250 then return ancestor end
+            return nil
+        end
+        ancestor = ancestor.Parent
+    end
+end
 local function testLOS(r, camera)
     -- Camera LOS only: no cannon origin, penetration, projectile arc or damage prediction.
     local from = camera.CFrame.Position
     local function reaches(part)
         if not part then return false end
         local result = workspace:Raycast(from, part.Position - from, rayParams)
-        return not result or result.Instance:IsDescendantOf(r.character)
+        if not result or result.Instance:IsDescendantOf(r.character) then return true end
+        if settings.vehicleLOS and r.seat then
+            local hit = result.Instance
+            if hit == r.seat then return true end
+            if hit:IsA("BasePart") and r.vehicleRoot and hit.AssemblyRootPart == r.vehicleRoot then return true end
+            if r.vehicleModel and hit:IsDescendantOf(r.vehicleModel) then return true end
+        end
+        return false
+    end
+    if settings.vehicleLOS and r.seat then
+        return reaches(r.seat) or reaches(r.vehicleRoot or r.root)
     end
     return reaches(r.head) or reaches(r.root)
 end
@@ -369,6 +396,12 @@ connect(RunService.Heartbeat, function(dt)
         r.root = character and character:FindFirstChild("HumanoidRootPart")
         r.head = character and character:FindFirstChild("Head")
         local seat = humanoid and humanoid.SeatPart
+        local assemblyRoot = seat and seat.AssemblyRootPart
+        if r.seat ~= seat or r.vehicleRoot ~= assemblyRoot then
+            r.seat, r.vehicleRoot = seat, assemblyRoot
+            r.vehicleModel = seat and vehicleModel(seat, assemblyRoot, character) or nil
+            r.los, r.checkedAt = nil, -math.huge
+        end
         r.anchor = settings.seat and seat or r.head or r.root
         local positionPart = settings.seat and seat or r.root
         r.distance = origin and positionPart and (origin - positionPart.Position).Magnitude

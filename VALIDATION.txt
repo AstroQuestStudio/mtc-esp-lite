@@ -4,8 +4,9 @@ PASS: category filters, all per-player modes, live team changes
 PASS: range, respawn, seat anchoring, death, absent local character
 PASS: occlusion settings, silhouettes, keyboard toggle, player leave/join
 PASS: blocked/clear/partial/target-hit LOS, visible-only filter, off-screen culling, body-box sizes
+PASS: seated hull/seat/turret LOS, walls and other vehicles blocking, exit seat, toggle, oversized-model rejection
 PASS: light/strong graphics, dynamic descendants, restoration, preservation of game changes, collisions untouched
 PASS: marker caps and LOS ray budgets with 60+ players
 PASS: incremental graphics budget and rendered-frame diagnostics
 PASS: repeated launch, complete GUI/marker/connection cleanup
-Environment: Fengari Lua 5.3 with mocked Roblox APIs. Syntax checked with luaparse. Roblox/Xeno/MTC rendering, ballistics and performance gains were NOT tested.
+Environment: Fengari Lua 5.3 with mocked Roblox APIs. Syntax checked with luaparse. Roblox/Xeno/MTC rendering, vehicle hierarchies, ballistics and performance gains were NOT tested.
