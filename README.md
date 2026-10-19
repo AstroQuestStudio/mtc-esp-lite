@@ -1,107 +1,94 @@
-# MTC ESP Lite v2.1
+# MTC Volumes v3
 
-## Correction v2.1 : visibilité des occupants de chars
+ESP client centré sur **chaque occupant** : cadres contrastés, volumes des membres à proximité et distance en studs. Aucun regroupement des équipages par char, aucune liste de joueurs, aucune affectation manuelle des camps.
 
-Option activée par défaut : **Dans un char : visibilité du véhicule**. Pour un joueur assis, les raycasts visent le siège et la racine de son assemblage. Une première collision avec son siège, une pièce du même assemblage physique ou du petit modèle de véhicule déduit est considérée comme dégagée. La coque du char ne rend donc plus systématiquement son équipage sombre. Un mur, le terrain ou un autre véhicule qui intervient avant reste bloquant.
+## Chargement
 
-Le modèle est déduit du plus proche ancêtre Model commun au siège et à sa racine physique ; les personnages et modèles dont la diagonale dépasse 250 studs sont exclus. Si aucun modèle fiable n’est obtenu, seule l’identité de l’assemblage et du siège est utilisée. Cela reste une détection générique à vérifier dans MTC ; un véhicule dont toutes les pièces sont indépendantes peut être détecté seulement en partie. Deux points de test ne couvrent pas toute la silhouette d’un char partiellement visible.
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/AstroQuestStudio/mtc-esp-lite/v3.0.0/mtc-esp.client.lua"))()
+```
 
-Le repère indique **véhicule visible**, pas équipage exposé ou blindage pénétrable. Les boîtes restent celles des personnages. Désactiver cette option rétablit le test tête/torse de v2. Sortir du siège rétablit automatiquement le test du personnage. L’option d’ancrage du repère au siège est indépendante.
+Cette commande charge la version v3.0.0 pour éviter une copie périmée de la branche main dans les caches. Relancer le script supprime l’ancienne instance et restaure les réglages graphiques qu’elle avait modifiés. Le fichier `loader.lua` contient la commande.
 
-## Nouveautés v2 : boîtes, visibilité et performances
+Ce chargement dépend des fonctions fournies par l’environnement client. Pour votre propre expérience Studio, copier le contenu de `mtc-esp.client.lua` dans un LocalScript sous **StarterPlayer > StarterPlayerScripts** et tester avec plusieurs clients.
 
-**Boîtes des personnages.** Volumes translucides calés sur les dimensions des parties du corps, accessoires et HumanoidRootPart exclus. Ce sont des repères visuels : les collisions ne changent pas, et les zones de dégâts propres au serveur ne sont pas connues.
+## Ce qui change en v3
 
-**Visibilité.** La tête et le centre du personnage sont testés par raycast depuis la caméra. Couleur vive si au moins un point est dégagé ; couleur sombre si les deux sont bloqués, si le test est en attente ou si son résultat est périmé. Une option masque tous les personnages sans ligne de vue dégagée. La distance reste en studs, sans nom à l’écran.
+- **Un cadre par personne**, à pied ou assise dans un véhicule. Deux occupants proches restent deux repères distincts.
+- Cadre écran calculé à partir du volume des parties du corps, dans l’orientation du HumanoidRootPart. Accessoires, HumanoidRootPart et pièces du véhicule exclus de ces dimensions.
+- Contour en pixels pour rester lisible à distance, doublé d’une bordure sombre ; remplissage léger coloré.
+- Deux styles : **PLEIN** ou **ANGLES**. Trois contrastes : **FIN**, **NET**, **FORT**.
+- Distance dans une pastille sombre indépendante. Les pastilles qui se chevauchent sont décalées dans la limite de six emplacements candidats ; les occupants ne sont jamais fusionnés. Les regroupements extrêmement denses peuvent encore produire des superpositions.
+- **Détails à proximité** : volumes translucides des membres à moins de 180 studs, option désactivable. Jusqu’à 12 occupants détaillés en NORMAL, 6 en mode performances ; au plus 16 parties par occupant.
+- Équipes automatiques : bleu allié, rouge ennemi, gris inconnu. Aucun nom, aucune santé et aucune liste de joueurs à l’écran ou dans le menu.
+- Distance calculée depuis le personnage local vers le personnage concerné, y compris lorsqu’il est assis.
 
-Il s’agit de visibilité depuis **la caméra**, pas d’une promesse de tir possible : origine du canon, trajectoire d’obus, blindage, pénétration et dégâts ne sont pas calculés. Vitres, objets transparents, fumée, pièces non interrogeables et streaming peuvent produire une différence avec les tirs réels. Le char local n’est pas automatiquement exclu des raycasts.
+Les cadres représentent des volumes visuels, pas nécessairement les zones de dégâts du serveur. Le script ne redimensionne pas les collisions physiques.
 
-**Charge de l’ESP bornée.** Repères uniquement à l’écran, parmi les joueurs les plus proches. Maximum réglable 12 / 24 / 48, initialement 24. Boîtes limitées à 12 personnages et 16 parties par personnage. Maximum de 24 raycasts par actualisation ; les vérifications tournent entre les joueurs, avec un résultat conservé au plus 0,9 seconde. Un mouvement rapide peut donc créer un court retard d’indication.
+## Menu refait
 
-**Performances réversibles.** Le bouton fait défiler :
+Panneau sombre avec état de l’ESP, compteur d’occupants et deux onglets :
 
-| Mode | Effets sur les graphismes | Charge ESP |
+**AFFICHAGE** : ESP actif, cadres, distance, style, contraste, détails proches, affichage à travers les obstacles, portée et maximum de repères.
+
+**PERFORMANCES** : choix direct entre NORMAL, LÉGER et FORT, compteur FPS/pire image/pics d’images, état des réductions graphiques.
+
+- **Insert** : ouvrir / réduire le menu.
+- **F8** : activer / désactiver l’ESP ; le mode graphique choisi reste actif.
+- **MTC / MENU** : bouton tactile pour ouvrir / réduire le panneau.
+- **Arrêter** : supprimer l’ESP et le menu, déconnecter ses événements et restaurer ses réglages graphiques.
+- Le panneau s’adapte à la largeur et la hauteur de l’écran ; chaque onglet défile indépendamment. Les réglages sont limités à la session du script.
+
+Les anciens filtres par catégorie, choix manuels de camp, liste, recherche de joueurs et surbrillances Highlight ont été retirés. Aucun analyseur ni nouveau système de visibilité à trois états n’a été ajouté.
+
+## Visibilité existante conservée
+
+La logique de v2.1 reste utilisée : test de tête/centre pour un personnage à pied ; test du siège et de la racine d’assemblage pour un occupant assis. Pour ce dernier, une première collision avec son propre siège, son assemblage ou le petit modèle de véhicule déduit est considérée comme dégagée. Un mur, le terrain ou un autre véhicule devant reste bloquant.
+
+Le modèle est déduit du plus proche ancêtre Model commun au siège et à sa racine physique ; les personnages et les modèles dont la diagonale dépasse 250 studs sont exclus. Sans modèle identifié, seul le siège ou l’assemblage physique est accepté. La structure réelle des chars MTC doit encore être vérifiée en jeu.
+
+Le cadre conserve une couleur vive si le test est dégagé, plus sombre sinon ou si la mesure est en attente/périmée. **Voir à travers** permet de conserver les cadres masqués ; si désactivé, les cadres sans ligne de vue dégagée sont retirés. Cette indication concerne la caméra, pas le canon, la pénétration du blindage ou les dégâts. Transparences, fumée, pièces non interrogeables, trajectoires et streaming peuvent créer des différences avec les tirs réels.
+
+Les vérifications tournent entre les occupants ; un résultat est conservé au maximum 0,9 seconde. Il peut donc y avoir un court retard après un mouvement de caméra ou d’obstacle. Aucun nouveau statut « partiellement visible » n’est introduit en v3.
+
+## Performances et limites de charge
+
+| Mode | Réductions graphiques | Charge ESP |
 | --- | --- | --- |
-| NORMAL | Graphismes d’origine | 10 actualisations/s, au plus 24 raycasts/actualisation |
-| LÉGER | Ombres globales, Bloom, Blur, DepthOfField et SunRays désactivés | 5 actualisations/s, au plus 12 raycasts/actualisation, 12 repères et 6 personnages avec boîtes |
-| FORT | Réductions précédentes ; ParticleEmitter, Trail, Beam, Fire, Smoke, Sparkles et ombres des lumières désactivés | Mêmes limites que LÉGER |
+| NORMAL | Graphismes du jeu | 10 actualisations logiques/s, au plus 24 raycasts/actualisation ; plafond de repères réglable 12/24/48 |
+| LÉGER | Ombres globales, Bloom, Blur, DepthOfField, SunRays désactivés | 5 actualisations logiques/s, au plus 12 raycasts/actualisation, 12 repères et 6 occupants détaillés |
+| FORT | Réductions précédentes, plus ParticleEmitter, Trail, Beam, Fire, Smoke, Sparkles et ombres des lumières désactivés | Mêmes limites que LÉGER |
 
-**FORT retire aussi les fumées, explosions et traînées produites par ces objets.** Cet effet est indiqué dans le menu. D’autres effets propres au jeu peuvent rester actifs. Le mode initial est NORMAL.
+**FORT retire aussi les fumées, explosions et traînées produites par ces objets.** C’est indiqué dans le menu. Le mode initial est NORMAL.
 
-Le parcours de la scène et le traitement des nouveaux objets sont progressifs : au plus 80 objets et une fenêtre de travail de 1,5 ms par Heartbeat. Cette fenêtre limite le travail entre objets ; elle ne garantit pas la durée d’un appel moteur ni le temps total d’une image. Aucun balayage GetDescendants à chaque image, aucune destruction de carte, aucune modification des collisions, textures ou matériaux.
+Le scan graphique est progressif : au plus 80 objets et une fenêtre de traitement de 1,5 ms par Heartbeat. Cette fenêtre borne le travail entre objets, sans garantir la durée d’un appel moteur individuel ni le temps total d’une image. Les propriétés sont mémorisées, puis restaurées au retour à NORMAL, à l’arrêt ou à la relance. Si le jeu a changé une propriété vers une autre valeur entre-temps, sa nouvelle valeur est conservée. Les effets détruits sont retirés du suivi. Le script ne force pas continuellement la désactivation d’un effet réactivé par le jeu.
 
-Retour à NORMAL, arrêt ou relance : les anciennes propriétés sont restaurées. Si le jeu les a modifiées entre-temps vers une autre valeur, sa nouvelle valeur est conservée. Les effets détruits sont retirés du suivi pour ne pas retenir les émetteurs des explosions. Le script ne force pas continuellement une propriété que le jeu réactive.
+Les cadres utilisent huit coins en cache par occupant et suivent la caméra à la cadence du rendu. Le calcul des dimensions du corps est rafraîchi séparément à fréquence limitée ; aucun parcours de scène n’est effectué à chaque image. Les formes posées peuvent donc avoir un léger retard lors d’un changement de pose, tandis que le déplacement global et la caméra restent suivis à chaque image. Les poses animées, accessoires et différences de structure peuvent limiter la précision visuelle.
 
-**Mesure locale.** Le panneau affiche sur environ deux secondes les FPS issus des images rendues, la durée de la pire image et le nombre d’images d’au moins 50 ms. Il ne mesure pas le ping. Comparer NORMAL / LÉGER / FORT dans une même scène permet d’observer l’effet sur votre machine.
+Les repères sont sélectionnés parmi les occupants les plus proches dont le centre est à l’écran. Les cadres passant derrière le plan proche de la caméra sont masqués pour éviter les rectangles géants/inversés. Les personnages morts ou non répliqués par le streaming ne sont pas affichés ; sans personnage local, les distances sont suspendues. Les chars vides ne sont pas détectés.
 
-Aucun gain de FPS n’est garanti : ces réglages visent le rendu client. Ils ne corrigent pas les scripts ou la physique du serveur, le réseau ou tous les pics de streaming.
+La mesure du panneau porte sur environ deux secondes d’images rendues : FPS calculés, pire image et nombre d’images d’au moins 50 ms. Ce n’est pas une mesure du ping. Aucun gain chiffré n’est garanti ; les modes ne corrigent pas le réseau, les scripts/physique du serveur ou tous les pics de streaming. Le plafond de 48 cadres augmente le travail de projection ; réduire ce plafond ou couper les détails proches peut aider sur une machine limitée.
 
-**Recherche MTC.** La [page officielle](https://www.roblox.com/games/95721658376580/Multicrew-Tank-Combat), consultée le 19 octobre 2026, confirme le jeu Top Giun et les rôles commandant, tireur, conducteur et chargeur. Elle ne documente pas les structures des chars, factions, zones de dégâts ou règles balistiques. Aucun chemin d’objet ou RemoteEvent propre à MTC n’a été inventé. Les chars vides et les modules de blindage ne sont pas détectés.
+## Validation
 
-**Validation v2.** Syntaxe vérifiée avec luaparse, logique exécutée sous Fengari avec API Roblox simulées. Tests : lignes de vue dégagées/bloquées/partielles, obstruction par un autre personnage, filtre de visibilité, retrait hors écran, tailles des boîtes, plafonds avec plus de 60 joueurs, modes graphiques, nouveaux objets, effets détruits, restauration, conservation des changements du jeu, collisions inchangées, traitement progressif, compteur d’images et nettoyage à la relance. Les tests de la v1 restent inclus. **Aucun test Roblox/Xeno/MTC ni gain réel de FPS mesuré depuis cet environnement.** Résultats : `VALIDATION.txt`.
+Syntaxe vérifiée avec luaparse ; comportement exécuté sous Fengari avec API Roblox simulées. Les scénarios couvrent :
 
-Documentation supplémentaire vérifiée avec Context7 : [Raycasts](https://create.roblox.com/docs/reference/engine/classes/WorldRoot#Raycast), [RaycastParams](https://create.roblox.com/docs/reference/engine/datatypes/RaycastParams), [BoxHandleAdornment](https://create.roblox.com/docs/reference/engine/classes/BoxHandleAdornment), [optimisation Roblox](https://create.roblox.com/docs/performance-optimization/improve).
+- Cadres distincts par occupant, distance, camps automatiques et changements d’équipe, absence de liste et de commandes par joueur.
+- Onglets, ouverture/réduction, Insert/F8, styles plein/angles, trois contrastes et bascules indépendantes cadres/distance/détails.
+- Suivi du déplacement à cadence de rendu, orientation des volumes, exclusion des accessoires, évolution des parties du corps, retrait hors écran et au plan proche.
+- Portée, respawn, décès, absence du personnage local, visibilité existante à pied et assis, obstacles et rejet des modèles trop grands.
+- Arrivée/départ des joueurs, pastilles de distance séparées sur des occupants superposés et taille constante du menu malgré le nombre de joueurs.
+- Préréglages graphiques, nouveaux effets et effets détruits, restauration, changements du jeu conservés, collisions inchangées.
+- Plus de 60 occupants simulés, plafonds de repères/raycasts, traitement progressif, compteur d’images et nettoyage à la relance.
 
-Les sections suivantes décrivent l’origine du projet et les contrôles conservés de la v1. En v2, l’actualisation passe à 5 Hz dans les modes performances et les repères hors écran sont exclus.
+**Aucun essai visuel dans Roblox, Xeno ou MTC, ni gain réel de FPS mesuré depuis cet environnement.** Les tests simulés ne valident pas le rendu réel ni la structure interne de MTC. Résultats détaillés : `VALIDATION.txt`.
 
-Version autonome centrée sur l’ESP, écrite après examen du dépôt [EdgeIY/infiniteyield](https://github.com/EdgeIY/infiniteyield), cloné dans `work/infiniteyield`.
+## Origine et documentation
 
-Révision examinée : `4c1f7f349ea23191733ce91eec174d5302b2b2d8`.
-Dans cette révision : `source:5726` définit ESP, `source:8098` enregistre `esp`, `source:8111` enregistre `espteam`.
+Version autonome écrite après examen de [EdgeIY/infiniteyield](https://github.com/EdgeIY/infiniteyield), révision `4c1f7f349ea23191733ce91eec174d5302b2b2d8`. `source:5726` définit ESP, `source:8098` enregistre esp, `source:8111` enregistre espteam. L’original pose des BoxHandleAdornment et un BillboardGui avec nom/santé/distance. Cette version conserve le principe des repères client et remplace la console complète par une interface spécialisée.
 
-## Fonctionnement de l’original
+La [page officielle de MTC](https://www.roblox.com/games/95721658376580/Multicrew-Tank-Combat) identifie le jeu de Top Giun et ses rôles d’équipage, sans documenter sa hiérarchie interne ou ses zones de dégâts. Aucun chemin de modèle ou RemoteEvent spécifique au jeu n’a été inventé.
 
-`esp` pose un BoxHandleAdornment sur chaque partie du personnage et un BillboardGui sur sa tête. Il actualise nom, santé et distance à chaque RenderStepped. `espteam` compare TeamColor : même couleur = vert, sinon rouge. Des événements recréent les repères après respawn et changement d’équipe.
+API vérifiées via Context7 : [UIStroke](https://create.roblox.com/docs/reference/engine/classes/UIStroke), [Camera](https://create.roblox.com/docs/reference/engine/classes/Camera), [CFrame](https://create.roblox.com/docs/reference/engine/datatypes/CFrame), [BoxHandleAdornment](https://create.roblox.com/docs/reference/engine/classes/BoxHandleAdornment), [Raycasts](https://create.roblox.com/docs/reference/engine/classes/WorldRoot#Raycast), [Assemblages](https://create.roblox.com/docs/reference/engine/classes/BasePart#AssemblyRootPart).
 
-## Cette version
-
-- Repère : distance seule, en studs (`st`), sans nom ni santé.
-- Alliés bleus, ennemis rouges, équipe inconnue grise.
-- Détection automatique par Player.Team, uniquement si les deux joueurs ont une équipe et ne sont pas neutres.
-- Choix par joueur : AUTO → ALLIÉ → ENNEMI → MASQUÉ. Le nom de compte apparaît uniquement dans la liste pour sélectionner la bonne personne.
-- Filtres par catégorie, recherche dans la liste et portée 500 / 1500 / 3000 / illimitée.
-- Distance calculée depuis le personnage local. Aucune conversion inventée en mètres.
-- Repère sur le siège quand un joueur est assis ; option désactivable.
-- Silhouette optionnelle du personnage, désactivée par défaut ; visibilité à travers les obstacles réglable.
-- Actualisation à 10 Hz, suivi des respawns et changements d’équipe, suppression à la sortie des joueurs.
-- Bouton d’arrêt complet et nettoyage de l’ancienne instance à la relance.
-- Réglages conservés uniquement pendant la session du script.
-
-## Utilisation
-
-Le fichier à utiliser est **mtc-esp.client.lua**. Il remplace le chargement du script Infinite Yield complet. Il ne fournit pas sa console ni ses commandes `;esp`.
-
-Chargement depuis le dépôt GitHub public :
-
-```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/AstroQuestStudio/mtc-esp-lite/main/mtc-esp.client.lua?v=2.1"))()
-```
-
-Dans votre propre expérience Studio, placez son contenu dans un **LocalScript** sous **StarterPlayer > StarterPlayerScripts**, puis lancez Play avec plusieurs clients pour vérifier les équipes.
-
-Si votre environnement client dispose déjà de `loadstring` et de lecture de fichiers, chargez le fichier local avec :
-
-```lua
-loadstring(readfile("mtc-esp.client.lua"))()
-```
-
-`readfile` n’est pas une API standard Roblox. Votre ancienne URL EdgeIY charge toujours Infinite Yield d’origine.
-
-- **Insert** ou bouton **ESP / MENU** : ouvrir / fermer le panneau.
-- **F8** : activer / désactiver l’affichage.
-- Mobile : bouton de menu et contrôles tactiles ; panneau défilant adapté à la taille d’écran.
-- Pour retirer une instance Infinite Yield déjà chargée, utiliser ses commandes `;noesp` et `;nochams` avant d’utiliser cette version, afin d’éviter les repères superposés.
-
-## Limites et vérification
-
-La capture identifie le jeu **[MTC] Multicrew Tank Combat**. Son code et son modèle de véhicules n’ont pas été fournis : il ne s’agit pas d’une intégration MTC validée en jeu.
-
-Le script utilise uniquement les personnages, équipes et sièges disponibles sur le client. Il ne détecte pas les chars vides, ne déduit pas l’équipe d’un véhicule et ne marque pas l’ensemble du char. Plusieurs occupants d’un même char peuvent produire des repères rapprochés. Si MTC utilise des factions personnalisées plutôt que Player.Team, employer les choix manuels.
-
-Les personnages non répliqués par le streaming ne peuvent pas être affichés. Les silhouettes dépendent des limites de rendu de Roblox. Un personnage local absent suspend les distances ; les personnages morts ne reçoivent pas de repère.
-
-Validation locale : voir VALIDATION.txt. Aucun essai dans Roblox/MTC n’a été réalisé depuis cet environnement.
-
-Documentation API vérifiée avec Context7 : [BillboardGui](https://create.roblox.com/docs/reference/engine/classes/BillboardGui), [Highlight](https://create.roblox.com/docs/reference/engine/classes/Highlight), [Teams](https://create.roblox.com/docs/reference/engine/classes/Teams), [Humanoid](https://create.roblox.com/docs/reference/engine/classes/Humanoid).
-
-Licence et attribution Infinite Yield : **LICENSE-InfiniteYield.txt**.
+Licence MIT et attribution Infinite Yield : `LICENSE` dans le dépôt ; `LICENSE-InfiniteYield.txt` dans le pack.

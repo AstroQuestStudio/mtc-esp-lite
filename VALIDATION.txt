@@ -1,12 +1,12 @@
 PASS: Lua syntax
-PASS: distances, blue allies, red enemies, gray unknown teams
-PASS: category filters, all per-player modes, live team changes
-PASS: range, respawn, seat anchoring, death, absent local character
-PASS: occlusion settings, silhouettes, keyboard toggle, player leave/join
-PASS: blocked/clear/partial/target-hit LOS, visible-only filter, off-screen culling, body-box sizes
-PASS: seated hull/seat/turret LOS, walls and other vehicles blocking, exit seat, toggle, oversized-model rejection
-PASS: light/strong graphics, dynamic descendants, restoration, preservation of game changes, collisions untouched
-PASS: marker caps and LOS ray budgets with 60+ players
-PASS: incremental graphics budget and rendered-frame diagnostics
-PASS: repeated launch, complete GUI/marker/connection cleanup
-Environment: Fengari Lua 5.3 with mocked Roblox APIs. Syntax checked with luaparse. Roblox/Xeno/MTC rendering, vehicle hierarchies, ballistics and performance gains were NOT tested.
+PASS: one occupant frame each, readable distances, automatic live teams, no player list or manual assignments
+PASS: menu tabs, collapse/reopen and Insert shortcut
+PASS: full/corner frame styles, three contrast levels, independent distances and frames, near-only body detail
+PASS: render-rate motion, rotated body bounds, accessory exclusion, streamed body updates, near-plane and off-screen culling
+PASS: range, respawn, death, absent local character, F8, retained clear/blocked LOS and occlusion switch
+PASS: existing seated hull/turret LOS preserved, walls/other vehicles blocking, oversized-model rejection
+PASS: player leave/join, separate overlapping occupants with shifted distance badges, constant menu size
+PASS: three direct performance presets, dynamic effects, restoration, game-side changes preserved, collisions untouched
+PASS: 60+ occupants, marker/raycast budgets, incremental graphics processing and frame diagnostics
+PASS: responsive menu, repeated launch, full graphics/frame/GUI/connection cleanup
+Environment: Fengari Lua 5.3 with mocked Roblox APIs. Syntax checked with luaparse. Native Roblox/Xeno/MTC rendering, vehicle hierarchies, ballistics and performance gains were NOT tested.

@@ -1,4 +1,4 @@
--- MTC ESP Lite v2.1: focused rewrite of EdgeIY/Infinite Yield's ESP concept.
+-- MTC ESP Lite v3: focused rewrite of EdgeIY/Infinite Yield's ESP concept.
 -- Upstream MIT attribution: see LICENSE-InfiniteYield.txt.
 -- Client only. Team/seat detection uses generic Roblox data, not MTC internals.
 local Players = game:GetService("Players")
@@ -15,16 +15,20 @@ if previous then
     previous:Destroy()
 end
 
-local settings = {enabled = true, allies = true, enemies = true, unknown = true,
-    through = true, silhouettes = false, seat = true, range = 1500,
-    boxes = true, visibleOnly = false, vehicleLOS = true, maxMarkers = 24}
+local settings = {enabled = true, through = true, range = 1500, boxes = true,
+    distance = true, details = true, vehicleLOS = true, maxMarkers = 24,
+    style = "PLEIN", contrast = 2}
 local colors = {ally = Color3.fromRGB(65, 156, 255), enemy = Color3.fromRGB(255, 79, 90),
     unknown = Color3.fromRGB(175, 184, 198)}
+local contrastStyles = {{thickness = 1.5, fill = 0.96, text = 12},
+    {thickness = 2.5, fill = 0.9, text = 13}, {thickness = 3.5, fill = 0.82, text = 14}}
 local records, connections = {}, {}
 local running = true
 local gui = Instance.new("ScreenGui")
 gui.Name = "MTC_ESPLite"
 gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 20
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 local stop = Instance.new("BindableEvent")
@@ -94,6 +98,7 @@ local function restoreGraphics()
     perf.seen = setmetatable({}, {__mode = "k"})
 end
 local function setPerformance(level)
+    if level == perf.level then return end
     restoreGraphics()
     perf.level = level
     if level > 0 then
@@ -129,104 +134,210 @@ local function processGraphics()
 end
 connect(workspace.DescendantAdded, enqueue)
 connect(Lighting.DescendantAdded, enqueue)
-local function text(parent, value, size)
-    return new("TextLabel", {Size = UDim2.new(1, 0, 0, size or 24), BackgroundTransparency = 1,
-        Text = value, TextColor3 = Color3.fromRGB(220, 228, 240), TextSize = 14,
-        Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left}, parent)
+local palette = {bg = Color3.fromRGB(13, 18, 27), card = Color3.fromRGB(22, 30, 43),
+    line = Color3.fromRGB(43, 56, 75), ink = Color3.fromRGB(236, 242, 250),
+    muted = Color3.fromRGB(142, 157, 179), accent = Color3.fromRGB(93, 210, 184)}
+local function round(obj, radius)
+    new("UICorner", {CornerRadius = UDim.new(0, radius or 9)}, obj)
 end
-local function button(parent, value, callback)
-    local b = new("TextButton", {Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = Color3.fromRGB(36, 47, 65),
-        BorderSizePixel = 0, Text = value, TextColor3 = Color3.fromRGB(235, 240, 250),
-        Font = Enum.Font.Gotham, TextSize = 13, AutoButtonColor = true}, parent)
-    new("UICorner", {CornerRadius = UDim.new(0, 6)}, b)
-    local click = connect(b.Activated, callback)
-    return b, click
+local function stroke(obj, color, width)
+    return new("UIStroke", {Color = color, Thickness = width or 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border}, obj)
+end
+local function text(parent, value, height)
+    return new("TextLabel", {Size = UDim2.new(1, 0, 0, height or 22), BackgroundTransparency = 1,
+        Text = value, TextColor3 = palette.ink, TextSize = 13, Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left}, parent)
+end
+local function button(parent, title, callback)
+    local b = new("TextButton", {Name = title, Size = UDim2.new(1, 0, 0, 38),
+        BackgroundColor3 = palette.card, BorderSizePixel = 0, Text = title,
+        TextColor3 = palette.ink, Font = Enum.Font.GothamMedium, TextSize = 12,
+        AutoButtonColor = true}, parent)
+    round(b)
+    connect(b.Activated, callback)
+    return b
 end
 
-local panel = new("Frame", {Position = UDim2.new(0, 14, 0, 60), Size = UDim2.fromOffset(350, 540),
-    BackgroundColor3 = Color3.fromRGB(19, 25, 36), BorderSizePixel = 0}, gui)
-new("UICorner", {CornerRadius = UDim.new(0, 10)}, panel)
+local panel = new("Frame", {Name = "ControlPanel", Position = UDim2.fromOffset(14, 60),
+    Size = UDim2.fromOffset(360, 570), BackgroundColor3 = palette.bg, BorderSizePixel = 0, ZIndex = 50}, gui)
+round(panel, 14)
+stroke(panel, palette.line)
 local scale = new("UIScale", {}, panel)
-local body = new("ScrollingFrame", {Position = UDim2.fromOffset(12, 10), Size = UDim2.new(1, -24, 1, -20),
-    BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 4,
-    AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new()}, panel)
-new("UIListLayout", {Padding = UDim.new(0, 7), SortOrder = Enum.SortOrder.LayoutOrder}, body)
-local order = 0
+local title = text(panel, "MTC  /  VOLUMES", 24)
+title.Position = UDim2.fromOffset(18, 15)
+title.Size = UDim2.new(1, -70, 0, 24)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 18
+local subtitle = text(panel, "OCCUPANTS  ·  ÉQUIPES AUTO", 18)
+subtitle.Position = UDim2.fromOffset(18, 41)
+subtitle.TextSize = 10
+subtitle.TextColor3 = palette.muted
+local close = button(panel, "Réduire", function() panel.Visible = false end)
+close.Position = UDim2.new(1, -44, 0, 14)
+close.Size = UDim2.fromOffset(28, 28)
+close.Text = "−"
+
+local summary = text(panel, "Initialisation…", 22)
+summary.Position = UDim2.fromOffset(18, 65)
+summary.Size = UDim2.new(1, -36, 0, 22)
+summary.TextSize = 11
+summary.TextColor3 = palette.accent
+local tabs = new("Frame", {Position = UDim2.fromOffset(14, 94), Size = UDim2.new(1, -28, 0, 34),
+    BackgroundTransparency = 1}, panel)
+local pages = {}
+local tabButtons = {}
+local function selectPage(name)
+    for key, page in pairs(pages) do
+        page.Visible = key == name
+        tabButtons[key].BackgroundColor3 = key == name and palette.accent or palette.card
+        tabButtons[key].TextColor3 = key == name and palette.bg or palette.muted
+    end
+end
+for i, name in ipairs({"AFFICHAGE", "PERFORMANCES"}) do
+    local page = new("ScrollingFrame", {Name = name, Position = UDim2.fromOffset(14, 140),
+        Size = UDim2.new(1, -28, 1, -190), BackgroundTransparency = 1, BorderSizePixel = 0,
+        ScrollBarThickness = 3, ScrollBarImageColor3 = palette.accent,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(), Visible = i == 1}, panel)
+    new("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, page)
+    new("UIPadding", {PaddingLeft = UDim.new(0, 2), PaddingRight = UDim.new(0, 7),
+        PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 8)}, page)
+    pages[name] = page
+    local b = button(tabs, name, function() selectPage(name) end)
+    b.Position = UDim2.new((i - 1) * 0.5, i == 1 and 0 or 4, 0, 0)
+    b.Size = UDim2.new(0.5, -4, 1, 0)
+    tabButtons[name] = b
+end
+local appearance, performance = pages.AFFICHAGE, pages.PERFORMANCES
+local sequence = 0
 local function ordered(obj)
-    order = order + 1
-    obj.LayoutOrder = order
+    sequence = sequence + 1
+    obj.LayoutOrder = sequence
     return obj
 end
-ordered(text(body, "MTC / ESP LITE", 28)).Font = Enum.Font.GothamBold
-ordered(text(body, "Bleu allié · rouge ennemi · gris inconnu", 22))
-local summary = ordered(text(body, "Initialisation…", 22))
-local diagnostics = ordered(text(body, "Mesure des images…", 22))
+local function section(parent, label)
+    local t = ordered(text(parent, label, 20))
+    t.TextColor3 = palette.muted
+    t.TextSize = 10
+    t.Font = Enum.Font.GothamBold
+    return t
+end
+local function row(parent, label, help, callback)
+    local b = ordered(button(parent, label, callback))
+    b.Text = ""
+    b.Size = UDim2.new(1, 0, 0, 56)
+    local heading = text(b, label, 20)
+    heading.Position = UDim2.fromOffset(12, 8)
+    heading.Size = UDim2.new(1, -103, 0, 20)
+    heading.Font = Enum.Font.GothamMedium
+    local note = text(b, help, 16)
+    note.Position = UDim2.fromOffset(12, 30)
+    note.Size = UDim2.new(1, -100, 0, 16)
+    note.TextSize = 10
+    note.TextColor3 = palette.muted
+    local value = text(b, "", 24)
+    value.Position = UDim2.new(1, -88, 0, 16)
+    value.Size = UDim2.fromOffset(76, 24)
+    value.TextXAlignment = Enum.TextXAlignment.Right
+    value.Font = Enum.Font.GothamBold
+    value.TextSize = 11
+    return b, value
+end
 local refreshers = {}
-local function toggle(key, label)
-    local b
-    local function refresh() b.Text = label .. (settings[key] and " : OUI" or " : NON") end
-    b = ordered(button(body, "", function() settings[key] = not settings[key]; refresh() end))
+local function toggle(parent, key, label, help)
+    local value, b
+    local function refresh()
+        value.Text = settings[key] and "ON  ●" or "OFF  ○"
+        value.TextColor3 = settings[key] and palette.accent or palette.muted
+    end
+    b, value = row(parent, label, help, function() settings[key] = not settings[key]; refresh() end)
     refreshers[key] = refresh
     refresh()
+    return b
 end
-toggle("enabled", "ESP actif")
-toggle("enemies", "Ennemis")
-toggle("allies", "Alliés")
-toggle("unknown", "Équipe inconnue (gris)")
-toggle("through", "Voir à travers les obstacles")
-toggle("boxes", "Boîtes des parties du corps")
-toggle("visibleOnly", "Ligne de vue dégagée uniquement")
-toggle("silhouettes", "Silhouettes des personnages")
-toggle("seat", "Ancrer au siège si assis")
-toggle("vehicleLOS", "Dans un char : visibilité du véhicule")
-ordered(text(body, "Clair = personnage ou véhicule visible", 22))
-ordered(text(body, "Sombre = ligne bloquée ou test en attente", 22))
-local perfNames = {[0] = "NORMAL", [1] = "LÉGER", [2] = "FORT"}
-local perfButton
-perfButton = ordered(button(body, "Performances : NORMAL", function()
-    setPerformance((perf.level + 1) % 3)
-    perfButton.Text = "Performances : " .. perfNames[perf.level]
-end))
-ordered(text(body, "Fort : coupe aussi fumée / explosions / traînées", 22))
-local perfStatus = ordered(text(body, "Graphismes d’origine", 22))
-local limitButton
-limitButton = ordered(button(body, "Repères max : 24 (les plus proches)", function()
-    settings.maxMarkers = settings.maxMarkers == 24 and 48 or (settings.maxMarkers == 48 and 12 or 24)
-    limitButton.Text = "Repères max : " .. settings.maxMarkers .. " (les plus proches)"
-end))
-local ranges = {500, 1500, 3000, math.huge}
-local rangeIndex = 2
-local rangeButton
-rangeButton = ordered(button(body, "Portée : 1500 studs", function()
+section(appearance, "L’ESSENTIEL")
+toggle(appearance, "enabled", "ESP actif", "Raccourci F8")
+toggle(appearance, "boxes", "Cadres des occupants", "Un cadre par personne, même en char")
+toggle(appearance, "distance", "Distance", "Studs uniquement · aucun nom")
+section(appearance, "RENDU DES VOLUMES")
+local styleValue
+local _, styleDisplay = row(appearance, "Style des cadres", "Contours complets ou angles", function()
+    settings.style = settings.style == "PLEIN" and "ANGLES" or "PLEIN"
+    styleValue.Text = settings.style
+end)
+styleValue = styleDisplay; styleValue.Text = settings.style
+local contrastNames = {"FIN", "NET", "FORT"}
+local contrastValue
+local _, contrastDisplay = row(appearance, "Contraste", "Épaisseur + intensité du remplissage", function()
+    settings.contrast = settings.contrast % 3 + 1
+    contrastValue.Text = contrastNames[settings.contrast]
+end)
+contrastValue = contrastDisplay; contrastValue.Text = contrastNames[settings.contrast]
+toggle(appearance, "details", "Détails à proximité", "Volumes des membres à moins de 180 st")
+toggle(appearance, "through", "Voir à travers", "Affiche aussi les occupants masqués")
+section(appearance, "PORTÉE")
+local ranges, rangeIndex = {500, 1500, 3000, math.huge}, 2
+local rangeValue
+local _, rangeDisplay = row(appearance, "Portée", "Distance depuis votre personnage", function()
     rangeIndex = rangeIndex % #ranges + 1
     settings.range = ranges[rangeIndex]
-    rangeButton.Text = "Portée : " .. (settings.range == math.huge and "illimitée" or tostring(settings.range) .. " studs")
-end))
-local search = ordered(new("TextBox", {Size = UDim2.new(1, 0, 0, 32), Text = "",
-    PlaceholderText = "Filtrer la liste des joueurs…", ClearTextOnFocus = false,
-    BackgroundColor3 = Color3.fromRGB(30, 40, 56), TextColor3 = Color3.new(1, 1, 1),
-    PlaceholderColor3 = Color3.fromRGB(155, 165, 180), Font = Enum.Font.Gotham, TextSize = 13}, body))
-ordered(text(body, "Joueurs : auto → allié → ennemi → masqué", 24))
-local list = ordered(new("Frame", {Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-    BackgroundTransparency = 1}, body))
-new("UIListLayout", {Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.Name}, list)
-ordered(button(body, "Réinitialiser les choix individuels", function()
-    for _, r in pairs(records) do r.mode = "auto" end
-end))
-ordered(text(body, "Insert : panneau · F8 : ESP · réglages de session", 24))
-ordered(button(body, "Arrêter et supprimer l’interface", function() stop:Fire() end))
-local reopen = button(gui, "ESP / MENU", function() panel.Visible = not panel.Visible end)
-reopen.Position = UDim2.fromOffset(14, 14)
-reopen.Size = UDim2.fromOffset(140, 34)
+    rangeValue.Text = settings.range == math.huge and "∞" or tostring(settings.range) .. " st"
+end)
+rangeValue = rangeDisplay; rangeValue.Text = "1500 st"
+local limitValue
+local _, limitDisplay = row(appearance, "Maximum à l’écran", "Priorité aux occupants les plus proches", function()
+    settings.maxMarkers = settings.maxMarkers == 24 and 48 or (settings.maxMarkers == 48 and 12 or 24)
+    limitValue.Text = tostring(settings.maxMarkers)
+end)
+limitValue = limitDisplay; limitValue.Text = tostring(settings.maxMarkers)
+local legend = ordered(text(appearance, "Bleu allié · rouge ennemi · gris inconnu", 24))
+legend.TextColor3 = palette.muted; legend.TextSize = 10
+
+section(performance, "PRÉRÉGLAGES GRAPHIQUES")
+local perfButtons = {}
+local perfNames = {[0] = "NORMAL", [1] = "LÉGER", [2] = "FORT"}
+local help = {[0] = "Graphismes du jeu · charge ESP normale", [1] = "Réduit ombres + effets d’image",
+    [2] = "Coupe aussi fumées / explosions / traînées"}
+for level = 0, 2 do
+    local b, value
+    b, value = row(performance, "Mode " .. perfNames[level], help[level], function()
+        setPerformance(level)
+        for index, item in pairs(perfButtons) do
+            item.value.Text = index == level and "ACTIF" or "CHOISIR"
+            item.value.TextColor3 = index == level and palette.accent or palette.muted
+            item.stroke.Color = index == level and palette.accent or palette.line
+        end
+    end)
+    perfButtons[level] = {value = value, stroke = stroke(b, level == 0 and palette.accent or palette.line)}
+    value.Text = level == 0 and "ACTIF" or "CHOISIR"
+    value.TextColor3 = level == 0 and palette.accent or palette.muted
+end
+section(performance, "MESURE SUR ENVIRON 2 SECONDES")
+local diagnostics = ordered(text(performance, "Mesure des images…", 44))
+diagnostics.TextWrapped = true
+diagnostics.TextSize = 13
+local perfStatus = ordered(text(performance, "Graphismes d’origine", 38))
+perfStatus.TextWrapped = true; perfStatus.TextColor3 = palette.muted; perfStatus.TextSize = 11
+local hint = ordered(text(performance, "LÉGER / FORT : 12 repères max, détail sur 6 occupants.\nL’arrêt restaure les réglages modifiés.", 42))
+hint.TextWrapped = true; hint.TextColor3 = palette.muted; hint.TextSize = 11
+local footer = text(panel, "INSERT · MENU     F8 · ESP", 20)
+footer.Position = UDim2.new(0, 18, 1, -33)
+footer.Size = UDim2.new(1, -120, 0, 20)
+footer.TextSize = 10; footer.TextColor3 = palette.muted
+local quit = button(panel, "Arrêter", function() stop:Fire() end)
+quit.Position = UDim2.new(1, -92, 1, -38); quit.Size = UDim2.fromOffset(76, 28)
+quit.TextColor3 = Color3.fromRGB(250, 136, 143)
+local reopen = button(gui, "MTC / MENU", function() panel.Visible = not panel.Visible end)
+reopen.Position = UDim2.fromOffset(14, 14); reopen.Size = UDim2.fromOffset(130, 32)
+reopen.ZIndex = 60
+stroke(reopen, palette.line)
+selectPage("AFFICHAGE")
 
 local function cleanup()
     if not running then return end
     running = false
     restoreGraphics()
     for _, c in ipairs(connections) do c:Disconnect() end
-    for _, r in pairs(records) do
-        if r.highlight then r.highlight:Destroy() end
-    end
     gui:Destroy()
 end
 connect(stop.Event, cleanup)
@@ -240,40 +351,48 @@ connect(UIS.InputBegan, function(input, processed)
     end
 end)
 
-local modes = {auto = "ally", ally = "enemy", enemy = "hidden", hidden = "auto"}
-local modeNames = {auto = "AUTO", ally = "ALLIÉ", enemy = "ENNEMI", hidden = "MASQUÉ"}
 local function add(p)
     if p == me or records[p] then return end
-    local r = {mode = "auto", boxes = {}, los = nil, checkedAt = -math.huge}
+    local r = {id = p.UserId, boxes = {}, los = nil, checkedAt = -math.huge}
     records[p] = r
-    r.billboard = new("BillboardGui", {Name = tostring(p.UserId), Size = UDim2.fromOffset(105, 26),
-        StudsOffsetWorldSpace = Vector3.new(0, 3, 0), AlwaysOnTop = true, Enabled = false}, marks)
-    r.label = text(r.billboard, "", 26)
+    r.frame = new("Frame", {Name = tostring(p.UserId), BackgroundTransparency = 1,
+        BorderSizePixel = 0, Visible = false}, marks)
+    r.back = new("Frame", {Name = "Back", Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1, BorderSizePixel = 0}, r.frame)
+    r.backStroke = stroke(r.back, Color3.fromRGB(3, 6, 10), 5)
+    r.fill = new("Frame", {Name = "Volume", Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 0.9, BorderSizePixel = 0}, r.frame)
+    r.outline = stroke(r.fill, colors.unknown, 3)
+    r.cornersUI = {}
+    for i = 1, 8 do
+        local edge = new("Frame", {Name = "Corner" .. i, BorderSizePixel = 0, Visible = false}, r.frame)
+        stroke(edge, Color3.fromRGB(3, 6, 10), 1)
+        table.insert(r.cornersUI, edge)
+    end
+    r.label = text(r.frame, "", 22)
+    r.label.Name = "Distance"
+    r.label.Size = UDim2.fromOffset(64, 22)
     r.label.TextXAlignment = Enum.TextXAlignment.Center
     r.label.Font = Enum.Font.GothamBold
-    r.label.TextSize = 16
-    r.label.TextStrokeTransparency = 0.2
-    r.row, r.click = button(list, "", function() r.mode = modes[r.mode] end)
-    r.row.Name = string.lower(p.Name) .. "_" .. tostring(p.UserId)
+    r.label.TextSize = 13
+    r.label.BackgroundColor3 = Color3.fromRGB(8, 13, 21)
+    r.label.BackgroundTransparency = 0.12
+    round(r.label, 5)
+    r.labelStroke = stroke(r.label, colors.unknown, 1)
 end
 local function remove(p)
     local r = records[p]
     if not r then return end
-    if r.highlight then r.highlight:Destroy() end
+    r.draw, r.corners = false, nil
     for _, box in ipairs(r.boxes) do box:Destroy() end
-    r.click:Disconnect()
-    local index = table.find(connections, r.click)
-    if index then table.remove(connections, index) end
-    r.billboard:Destroy()
-    r.row:Destroy()
+    r.frame:Destroy()
     records[p] = nil
 end
 connect(Players.PlayerAdded, add)
 connect(Players.PlayerRemoving, remove)
 for _, p in ipairs(Players:GetPlayers()) do add(p) end
 
-local function relation(p, mode)
-    if mode == "ally" or mode == "enemy" then return mode end
+local function relation(p)
     if me.Neutral or p.Neutral or not me.Team or not p.Team then return "unknown" end
     return p.Team == me.Team and "ally" or "enemy"
 end
@@ -281,6 +400,7 @@ local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 rayParams.IgnoreWater = false
 local elapsed, clock, losCursor = 0, 0, 0
+local drawList = {}
 local frameTime, frameCount, worstFrame, spikes = 0, 0, 0, 0
 connect(RunService.RenderStepped, function(dt)
     frameTime = frameTime + dt
@@ -303,14 +423,24 @@ local function updateBoxes(r, enabled, color, clear)
         if #r.boxes > 0 then clearBoxes(r) end
         return
     end
-    if r.boxCharacter ~= r.character then
-        clearBoxes(r)
-        r.boxCharacter = r.character
-        -- Direct body parts only, excluding accessories and the invisible root.
+    if r.boxCharacter ~= r.character or clock >= (r.nextDetailCheck or 0) then
+        r.nextDetailCheck = clock + 0.75
+        local parts = {}
         for _, part in ipairs(r.character:GetChildren()) do
-            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and #r.boxes < 16 then
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and #parts < 16 then
+                table.insert(parts, part)
+            end
+        end
+        local changed = r.boxCharacter ~= r.character or #parts ~= #r.boxes
+        for i, part in ipairs(parts) do
+            if not r.boxes[i] or r.boxes[i].Adornee ~= part then changed = true; break end
+        end
+        if changed then
+            clearBoxes(r)
+            r.boxCharacter = r.character
+            for _, part in ipairs(parts) do
                 table.insert(r.boxes, new("BoxHandleAdornment", {Name = "BodyBox", Adornee = part,
-                    Size = part.Size, Color3 = color, Transparency = 0.72,
+                    Size = part.Size, Color3 = color, Transparency = 0.65,
                     AlwaysOnTop = settings.through, ZIndex = 5}, marks))
             end
         end
@@ -320,10 +450,130 @@ local function updateBoxes(r, enabled, color, clear)
             box.Size = box.Adornee.Size
             box.Color3 = color
             box.AlwaysOnTop = settings.through
-            box.Transparency = clear and 0.72 or 0.88
+            box.Transparency = clear and 0.65 or 0.82
         end
     end
 end
+
+-- Root-relative bounds of direct body parts: accessories and vehicle parts never
+-- contribute. Refresh the pose at a bounded rate; project the cached corners at
+-- render rate so camera motion stays smooth without per-frame scene traversal.
+local function updateBounds(r)
+    local minX, minY, minZ = math.huge, math.huge, math.huge
+    local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+    local count = 0
+    for _, part in ipairs(r.character:GetChildren()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and count < 32 then
+            local cf = r.root.CFrame:ToObjectSpace(part.CFrame)
+            local p, size = cf.Position, part.Size
+            local right, up, look = cf.RightVector, cf.UpVector, cf.LookVector
+            local hx = (math.abs(right.X) * size.X + math.abs(up.X) * size.Y + math.abs(look.X) * size.Z) * 0.5
+            local hy = (math.abs(right.Y) * size.X + math.abs(up.Y) * size.Y + math.abs(look.Y) * size.Z) * 0.5
+            local hz = (math.abs(right.Z) * size.X + math.abs(up.Z) * size.Y + math.abs(look.Z) * size.Z) * 0.5
+            minX, minY, minZ = math.min(minX, p.X - hx), math.min(minY, p.Y - hy), math.min(minZ, p.Z - hz)
+            maxX, maxY, maxZ = math.max(maxX, p.X + hx), math.max(maxY, p.Y + hy), math.max(maxZ, p.Z + hz)
+            count = count + 1
+        end
+    end
+    r.corners = nil
+    if count > 0 then
+        r.corners = {}
+        for _, x in ipairs({minX, maxX}) do
+            for _, y in ipairs({minY, maxY}) do
+                for _, z in ipairs({minZ, maxZ}) do table.insert(r.corners, Vector3.new(x, y, z)) end
+            end
+        end
+    end
+    r.boundsRoot = r.root
+    r.nextBoundsAt = clock + (perf.level > 0 and 0.5 or 0.25)
+end
+
+local function projectBounds(r, camera)
+    local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
+    if not r.root or not r.root.Parent or not r.corners then return nil end
+    local cf = r.root.CFrame
+    for _, corner in ipairs(r.corners) do
+        local point = camera:WorldToViewportPoint(cf:PointToWorldSpace(corner))
+        -- Avoid giant/inverted boxes when the camera intersects a character.
+        if point.Z <= 0.05 then return nil end
+        minX, minY = math.min(minX, point.X), math.min(minY, point.Y)
+        maxX, maxY = math.max(maxX, point.X), math.max(maxY, point.Y)
+    end
+    local width, height = camera.ViewportSize.X, camera.ViewportSize.Y
+    if maxX < 0 or maxY < 0 or minX > width or minY > height then return nil end
+    if maxX - minX > width * 2 or maxY - minY > height * 2 then return nil end
+    local midX, midY = (minX + maxX) * 0.5, (minY + maxY) * 0.5
+    local w, h = math.max(6, maxX - minX), math.max(12, maxY - minY)
+    return math.max(0, midX - w * 0.5), math.max(0, midY - h * 0.5),
+        math.min(width, midX + w * 0.5), math.min(height, midY + h * 0.5)
+end
+
+local occupiedLabels = {}
+connect(RunService.RenderStepped, function()
+    local camera = workspace.CurrentCamera
+    local labelCount = 0
+    local style = contrastStyles[settings.contrast]
+    for _, r in ipairs(drawList) do
+        r.frame.Visible = false
+        if camera and settings.enabled and r.draw and r.character == nil then r.draw = false end
+        if camera and settings.enabled and r.draw then
+            local x1, y1, x2, y2 = projectBounds(r, camera)
+            if x1 and x2 > x1 and y2 > y1 then
+                local w, h = x2 - x1, y2 - y1
+                r.frame.Visible = settings.boxes or settings.distance
+                r.frame.Position = UDim2.fromOffset(x1, y1)
+                r.frame.Size = UDim2.fromOffset(w, h)
+                local thickness = style.thickness
+                local full = settings.boxes and settings.style == "PLEIN"
+                r.fill.BackgroundColor3 = r.color
+                r.fill.BackgroundTransparency = settings.boxes and math.min(1, style.fill + (r.clear and 0 or 0.05)) or 1
+                r.outline.Color = r.color
+                r.outline.Thickness = thickness
+                r.outline.Enabled = full
+                r.backStroke.Thickness = thickness + 2
+                r.backStroke.Enabled = full
+                local length = math.max(3, math.min(18, w * 0.3, h * 0.25))
+                for i, edge in ipairs(r.cornersUI) do
+                    local corner = math.floor((i - 1) / 2)
+                    local right = corner % 2 == 1
+                    local bottom = corner >= 2
+                    local horizontal = i % 2 == 1
+                    local ew, eh = horizontal and length or thickness, horizontal and thickness or length
+                    edge.Visible = settings.boxes and not full
+                    edge.BackgroundColor3 = r.color
+                    edge.Position = UDim2.fromOffset(right and w - ew or 0, bottom and h - eh or 0)
+                    edge.Size = UDim2.fromOffset(ew, eh)
+                end
+                r.label.Visible = settings.distance
+                r.label.TextSize = style.text
+                if settings.distance then
+                    local lx = math.clamp((x1 + x2) * 0.5 - 32, 2, math.max(2, camera.ViewportSize.X - 66))
+                    local ly = math.min(camera.ViewportSize.Y - 24, y2 + 5)
+                    -- Keep occupants separate; only nudge colliding distance badges.
+                    for attempt = 0, 5 do
+                        local candidateY = y2 + 5 + attempt * 24
+                        if candidateY > camera.ViewportSize.Y - 24 then candidateY = y1 - 27 - attempt * 24 end
+                        candidateY = math.clamp(candidateY, 2, math.max(2, camera.ViewportSize.Y - 24))
+                        local overlaps = false
+                        for j = 1, labelCount do
+                            local placed = occupiedLabels[j]
+                            if lx < placed.x + 66 and lx + 66 > placed.x and candidateY < placed.y + 24 and candidateY + 24 > placed.y then
+                                overlaps = true; break
+                            end
+                        end
+                        ly = candidateY
+                        if not overlaps then break end
+                    end
+                    labelCount = labelCount + 1
+                    local placed = occupiedLabels[labelCount]
+                    if not placed then placed = {}; occupiedLabels[labelCount] = placed end
+                    placed.x, placed.y = lx, ly
+                    r.label.Position = UDim2.fromOffset(lx - x1, ly - y1)
+                end
+            end
+        end
+    end
+end)
 
 local function vehicleModel(seat, assemblyRoot, character)
     -- Infer only a small common model of physically related parts.
@@ -370,27 +620,21 @@ connect(RunService.Heartbeat, function(dt)
     elapsed = 0
     local camera = workspace.CurrentCamera
     if camera then
-        scale.Scale = math.clamp(math.min((camera.ViewportSize.X - 28) / 350,
-            (camera.ViewportSize.Y - 74) / 540, 1), 0.25, 1)
+        scale.Scale = math.clamp((camera.ViewportSize.X - 28) / 360, 0.4, 1)
+        panel.Size = UDim2.fromOffset(360, math.min(570, math.max(220, (camera.ViewportSize.Y - 80) / scale.Scale)))
     end
     local ownRoot = me.Character and me.Character:FindFirstChild("HumanoidRootPart")
     local origin = ownRoot and ownRoot.Position
     local candidates = {}
     local shown, missing, total = 0, 0, 0
-    local query = string.lower(search.Text)
     for p, r in pairs(records) do
         total = total + 1
-        r.kind = relation(p, r.mode)
-        local color = colors[r.kind]
-        local rowText = "@" .. p.Name .. "  ·  " .. modeNames[r.mode]
-        if r.row.Text ~= rowText then r.row.Text = rowText end
-        r.row.TextColor3 = r.mode == "hidden" and Color3.fromRGB(110, 120, 135) or color
-        r.row.Visible = query == "" or string.find(string.lower(p.Name .. " " .. p.DisplayName), query, 1, true) ~= nil
+        r.kind = relation(p)
         local character = p.Character
         if r.character ~= character then
-            if r.highlight then r.highlight:Destroy(); r.highlight = nil end
             clearBoxes(r)
             r.character, r.los, r.checkedAt = character, nil, -math.huge
+            r.corners, r.boundsRoot = nil, nil
         end
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
         r.root = character and character:FindFirstChild("HumanoidRootPart")
@@ -402,26 +646,25 @@ connect(RunService.Heartbeat, function(dt)
             r.vehicleModel = seat and vehicleModel(seat, assemblyRoot, character) or nil
             r.los, r.checkedAt = nil, -math.huge
         end
-        r.anchor = settings.seat and seat or r.head or r.root
-        local positionPart = settings.seat and seat or r.root
+        local positionPart = r.root
         r.distance = origin and positionPart and (origin - positionPart.Position).Magnitude
         if not r.root then missing = missing + 1 end
-        local categoryEnabled = (r.kind == "ally" and settings.allies)
-            or (r.kind == "enemy" and settings.enemies) or (r.kind == "unknown" and settings.unknown)
         local onScreen = false
         if camera and r.root then
             local _, inViewport = camera:WorldToViewportPoint(r.root.Position)
             onScreen = inViewport
         end
         r.selected = false
-        if settings.enabled and r.mode ~= "hidden" and categoryEnabled and onScreen
-            and humanoid and humanoid.Health > 0 and r.anchor and r.distance and r.distance <= settings.range then
+        if settings.enabled and onScreen and humanoid and humanoid.Health > 0
+            and r.root and r.distance and r.distance <= settings.range then
             table.insert(candidates, r)
         else
             r.los, r.checkedAt = nil, -math.huge
         end
     end
-    table.sort(candidates, function(a, b) return a.distance < b.distance end)
+    table.sort(candidates, function(a, b)
+        return a.distance < b.distance or (a.distance == b.distance and a.id < b.id)
+    end)
     local limit = math.min(#candidates, settings.maxMarkers, perf.level > 0 and 12 or 48)
     for i = 1, limit do candidates[i].selected = true end
     -- At most 24 raycasts/update (12 when a performance mode is active).
@@ -437,39 +680,31 @@ connect(RunService.Heartbeat, function(dt)
     local boxCount = 0
     for _, r in ipairs(candidates) do
         r.useBoxes = false
-        if r.selected and settings.boxes and boxCount < (perf.level > 0 and 6 or 12) then
+        if r.selected and settings.boxes and settings.details and r.distance <= 180 and boxCount < (perf.level > 0 and 6 or 12) then
             r.useBoxes = true
             boxCount = boxCount + 1
         end
     end
+    drawList = {}
+    for _, r in ipairs(candidates) do
+        if r.selected then table.insert(drawList, r) end
+    end
     for _, r in pairs(records) do
         local clear = r.los == true and clock - r.checkedAt <= 0.9
-        local visible = r.selected and (not settings.visibleOnly or clear)
+        r.draw = r.selected and (settings.through or clear)
+        if not r.draw then r.frame.Visible = false end
         local baseColor = colors[r.kind]
-        local color = clear and baseColor or baseColor:Lerp(Color3.fromRGB(80, 85, 95), 0.8)
-        r.billboard.Enabled = visible
-        r.billboard.Adornee = r.anchor
-        r.billboard.AlwaysOnTop = settings.through
-        if visible then
+        r.color = clear and baseColor or baseColor:Lerp(Color3.fromRGB(80, 85, 95), 0.8)
+        r.clear = clear
+        if r.draw then
             shown = shown + 1
             r.label.Text = tostring(math.floor(r.distance + 0.5)) .. " st"
-            r.label.TextColor3 = color
+            r.label.TextColor3 = palette.ink
+            r.labelStroke.Color = r.color
+            if r.boundsRoot ~= r.root or clock >= (r.nextBoundsAt or 0) then updateBounds(r) end
         end
-        updateBoxes(r, visible and r.useBoxes, color, clear)
-        if visible and settings.silhouettes and r.character and not r.highlight then
-            r.highlight = new("Highlight", {Name = "MTC_LocalHighlight", Adornee = r.character,
-                FillTransparency = 0.85, OutlineTransparency = 0.1}, r.character)
-        end
-        if r.highlight then
-            if not visible or not settings.silhouettes then
-                r.highlight:Destroy(); r.highlight = nil
-            else
-                r.highlight.FillColor = color
-                r.highlight.OutlineColor = color
-                r.highlight.DepthMode = settings.through and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
-            end
-        end
+        updateBoxes(r, r.draw and r.useBoxes, r.color, clear)
     end
-    summary.Text = string.format("%d repères / %d joueurs · %d sans personnage", shown, total, missing)
+    summary.Text = string.format("%d OCCUPANTS À L’ÉCRAN  /  %d", shown, total)
     perfStatus.Text = perf.level == 0 and "Graphismes d’origine" or string.format("%d réglages réduits · %d objets en attente", perf.count, math.max(0, perf.tail - perf.head + 1))
 end)
