@@ -1,12 +1,10 @@
-PASS: Lua syntax
-PASS: one occupant frame each, readable distances, automatic live teams, no player list or manual assignments
-PASS: menu tabs, collapse/reopen and Insert shortcut
-PASS: full/corner frame styles, three contrast levels, independent distances and frames, near-only body detail
-PASS: render-rate motion, rotated body bounds, accessory exclusion, streamed body updates, near-plane and off-screen culling
-PASS: range, respawn, death, absent local character, F8, retained clear/blocked LOS and occlusion switch
-PASS: existing seated hull/turret LOS preserved, walls/other vehicles blocking, oversized-model rejection
-PASS: player leave/join, separate overlapping occupants with shifted distance badges, constant menu size
-PASS: three direct performance presets, dynamic effects, restoration, game-side changes preserved, collisions untouched
-PASS: 60+ occupants, marker/raycast budgets, incremental graphics processing and frame diagnostics
-PASS: responsive menu, repeated launch, full graphics/frame/GUI/connection cleanup
-Environment: Fengari Lua 5.3 with mocked Roblox APIs. Syntax checked with luaparse. Native Roblox/Xeno/MTC rendering, vehicle hierarchies, ballistics and performance gains were NOT tested.
+PASS: renderer patch syntax; upstream preserved outside ESP and its command description
+PASS: original body boxes/head billboard/font/stroke/opacity; 3-letter username, H85%, target-team colored E, studs
+PASS: health normalized to MaxHealth, rounded, clamped 0-100%, zero MaxHealth handled
+PASS: short usernames, A/E relation, local team changes, 10 actual team colors shared by letter and boxes
+PASS: original rebuild path, replacement character and live distance updates
+PASS: espteam uses actual team colors; original noesp callback cleanup
+PASS: in-place Infinite Yield upgrade, old callbacks drained before restart, repeated upgrade cleanup, unavailable-global fallback
+PASS: complete script compiled with official Luau 0.743
+Compiled 13 KLOC into 625 KB bytecode (read 0.00s, parse 0.01s, compile 0.03s)
+Behavior tests: Fengari with mocked Roblox APIs. Full original Infinite Yield compiled but was not executed. Roblox/Xeno/MTC runtime and native rendering were NOT tested.
