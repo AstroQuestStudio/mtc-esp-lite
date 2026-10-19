@@ -74,7 +74,7 @@ Le fichier à utiliser est **mtc-esp.client.lua**. Il remplace le chargement du 
 Chargement depuis le dépôt GitHub public :
 
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/AstroQuestStudio/mtc-esp-lite/main/mtc-esp.client.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/AstroQuestStudio/mtc-esp-lite/main/mtc-esp.client.lua?v=2.1"))()
 ```
 
 Dans votre propre expérience Studio, placez son contenu dans un **LocalScript** sous **StarterPlayer > StarterPlayerScripts**, puis lancez Play avec plusieurs clients pour vérifier les équipes.
