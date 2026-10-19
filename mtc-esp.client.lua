@@ -1,6 +1,6 @@
--- Infinite Yield original ESP + compact labels, v4.0.0.
+-- Infinite Yield original ESP + compact labels, v4.1.0.
 -- Original: EdgeIY/infiniteyield (MIT), see LICENSE-InfiniteYield.txt.
--- Custom: first 3 username characters | Hpercent | A/E in actual team color | studs.
+-- Custom: short ally names; compact enemy health/team/range; collision-managed labels.
 -- Stop previous MTC Volumes instances, including their reversible graphics mode.
 pcall(function()
     local player = game:GetService("Players").LocalPlayer
@@ -24,23 +24,157 @@ if IY_LOADED and not _G.IY_DEBUG then
     -- Let old RenderStepped callbacks observe the removed ESP folders and disconnect.
     RunService.RenderStepped:Wait()
     task.wait()
+local function compactESPIsAlly(plr)
+    if plr.Team and Players.LocalPlayer.Team and not plr.Neutral and not Players.LocalPlayer.Neutral then
+        return plr.Team == Players.LocalPlayer.Team
+    end
+    return plr.TeamColor == Players.LocalPlayer.TeamColor
+end
 local function compactESPText(plr, humanoid, distance)
+    local color = plr.TeamColor.Color
+    local function channel(value) return math.max(0, math.min(255, math.floor(value * 255 + 0.5))) end
+    local hex = string.format("#%02X%02X%02X", channel(color.R), channel(color.G), channel(color.B))
+    local name = string.sub(plr.Name, 1, 3)
+    if compactESPIsAlly(plr) then return string.format('<font color="%s">%s</font>', hex, name) end
     local health = 0
     if humanoid and humanoid.MaxHealth > 0 then
         health = math.max(0, math.min(100, math.floor(humanoid.Health / humanoid.MaxHealth * 100 + 0.5)))
     end
-    local color = plr.TeamColor.Color
-    local function channel(value) return math.max(0, math.min(255, math.floor(value * 255 + 0.5))) end
-    local hex = string.format("#%02X%02X%02X", channel(color.R), channel(color.G), channel(color.B))
-    local ally
-    if plr.Team and Players.LocalPlayer.Team and not plr.Neutral and not Players.LocalPlayer.Neutral then
-        ally = plr.Team == Players.LocalPlayer.Team
-    else
-        -- Same fallback as Infinite Yield when only TeamColor is available.
-        ally = plr.TeamColor == Players.LocalPlayer.TeamColor
+    local range = type(distance) == "number" and distance >= 1000 and string.format("%.1fk", distance / 1000) or tostring(distance)
+    return string.format('%s | H%d%% | <font color="%s">E</font> | %s st', name, health, hex, range)
+end
+
+-- Shared, screen-space label placement. The original body adornments are untouched.
+if type(IY_COMPACT_LABELS_STOP) == "function" then pcall(IY_COMPACT_LABELS_STOP) end
+local compactLabels = {}
+local layoutConnection, labelCanvas
+local layoutElapsed = 0.08
+local function stopCompactLayout()
+    if layoutConnection then layoutConnection:Disconnect(); layoutConnection = nil end
+    for _, item in pairs(compactLabels) do
+        item.destroyConnection:Disconnect()
     end
-    return string.format('%s | H%d%% | <font color="%s">%s</font> | %s st',
-        string.sub(plr.Name, 1, 3), health, hex, ally and "A" or "E", tostring(distance))
+    compactLabels = {}
+    if labelCanvas then labelCanvas:Destroy(); labelCanvas = nil end
+end
+IY_COMPACT_LABELS_STOP = stopCompactLayout
+
+local function layoutCompactLabels(dt)
+    layoutElapsed = layoutElapsed + dt
+    if layoutElapsed < 0.08 then return end
+    layoutElapsed = 0
+    local camera = workspace.CurrentCamera
+    local root = Players.LocalPlayer.Character and getRoot(Players.LocalPlayer.Character)
+    local visible = {}
+    for plr, item in pairs(compactLabels) do
+        item.billboard.Enabled = false
+        item.line.Visible, item.dot.Visible = false, false
+        local head = item.billboard.Adornee
+        if ESPenabled and camera and root and head and head.Parent then
+            local point, onScreen = camera:WorldToViewportPoint(head.Position)
+            if onScreen and point.Z > 0 then
+                item.x, item.y = point.X, point.Y
+                item.distance = (root.Position - head.Position).Magnitude
+                item.ally = compactESPIsAlly(plr)
+                item.label.TextSize = item.ally and 16 or (item.distance >= 1500 and 16 or 20)
+                local measured = item.label.TextBounds
+                local plain = item.label.Text:gsub("<[^>]+>", "")
+                item.width = math.max(32, math.ceil(measured and measured.X > 0 and measured.X or #plain * item.label.TextSize * 0.6) + 8)
+                item.width = math.min(item.width, math.max(32, camera.ViewportSize.X - 16))
+                table.insert(visible, item)
+            end
+        end
+    end
+    table.sort(visible, function(a, b)
+        if a.ally ~= b.ally then return not a.ally end
+        if a.distance ~= b.distance then return a.distance < b.distance end
+        return a.player.UserId < b.player.UserId
+    end)
+    local occupied = {}
+    for _, item in ipairs(visible) do
+        local w, h = item.width, 22
+        local baseX, baseY = item.x, item.y - 24
+        local chosen
+        local function try(dx, row)
+            local x, y = baseX + dx - w * 0.5, baseY + row * 25 - h * 0.5
+            local top = math.min(110, camera.ViewportSize.Y * 0.18)
+            if x < 8 or x + w > camera.ViewportSize.X - 8 or y < top or y + h > camera.ViewportSize.Y - 20 then return false end
+            for _, rect in ipairs(occupied) do
+                if x < rect.x + rect.w + 6 and x + w + 6 > rect.x and y < rect.y + rect.h + 3 and y + h + 3 > rect.y then return false end
+            end
+            chosen = {x = x, y = y, w = w, h = h, dx = dx, row = row}
+            return true
+        end
+        try(0, 0)
+        if not chosen and item.lastDX then try(item.lastDX, item.lastRow) end
+        if not chosen then
+            for _, column in ipairs({0, -1, 1, -2, 2}) do
+                local dx = column * math.max(w + 14, 220)
+                for step = 0, 32 do
+                    local row = step == 0 and 0 or (step % 2 == 1 and -math.ceil(step / 2) or step / 2)
+                    if try(dx, row) then break end
+                end
+                if chosen then break end
+            end
+        end
+        if chosen then
+            item.lastDX, item.lastRow = chosen.dx, chosen.row
+            table.insert(occupied, chosen)
+            item.billboard.Size = UDim2.new(0, w, 0, h)
+            local cx, cy = chosen.x + w * 0.5, chosen.y + h * 0.5
+            item.billboard.SizeOffset = Vector2.new((cx - item.x) / w, (item.y - cy) / h)
+            item.billboard.Enabled = true
+            local moved = math.abs(chosen.dx) > 1 or chosen.row ~= 0
+            if moved then
+                -- Leader ends at the nearest edge of the moved text's rectangle.
+                local ex = math.max(chosen.x, math.min(chosen.x + w, item.x))
+                local ey = math.max(chosen.y, math.min(chosen.y + h, item.y))
+                local dx, dy = ex - item.x, ey - item.y
+                item.line.Position = UDim2.fromOffset((item.x + ex) * 0.5, (item.y + ey) * 0.5)
+                item.line.Size = UDim2.fromOffset(math.sqrt(dx * dx + dy * dy), 1)
+                item.line.Rotation = math.deg(math.atan2(dy, dx))
+                item.line.BackgroundColor3 = item.player.TeamColor.Color
+                item.line.Visible = true
+                item.dot.Position = UDim2.fromOffset(item.x, item.y)
+                item.dot.BackgroundColor3 = item.player.TeamColor.Color
+                item.dot.Visible = true
+            end
+        end
+        -- If the viewport is truly full, keep the body's boxes and omit the extra
+        -- text rather than forcing another overlapping label into the same space.
+    end
+end
+
+local function registerCompactLabel(plr, holder, billboard, label)
+    if not labelCanvas then
+        labelCanvas = Instance.new("ScreenGui")
+        labelCanvas.Name = "IY_CompactESPLinks"
+        labelCanvas.IgnoreGuiInset = true
+        labelCanvas.ResetOnSpawn = false
+        labelCanvas.Parent = COREGUI
+    end
+    local item = {player = plr, billboard = billboard, label = label}
+    local function marker(name, transparency)
+        local frame = Instance.new("Frame")
+        frame.Name = name
+        frame.AnchorPoint = Vector2.new(0.5, 0.5)
+        frame.BorderSizePixel = 0
+        frame.BackgroundTransparency = transparency
+        frame.Visible = false
+        frame.Parent = labelCanvas
+        return frame
+    end
+    item.line, item.dot = marker("Leader", 0.5), marker("Anchor", 0.1)
+    item.dot.Size = UDim2.fromOffset(3, 3)
+    compactLabels[plr] = item
+    item.destroyConnection = holder.Destroying:Connect(function()
+        if compactLabels[plr] == item then compactLabels[plr] = nil end
+        item.destroyConnection:Disconnect()
+        item.line:Destroy(); item.dot:Destroy()
+        if next(compactLabels) == nil then stopCompactLayout() end
+    end)
+    if not layoutConnection then layoutConnection = RunService.RenderStepped:Connect(layoutCompactLabels) end
+    layoutElapsed = 0.08
 end
 
 function ESP(plr, logic)
@@ -75,20 +209,22 @@ function ESP(plr, logic)
 				BillboardGui.Adornee = plr.Character.Head
 				BillboardGui.Name = plr.Name
 				BillboardGui.Parent = ESPholder
-				BillboardGui.Size = UDim2.new(0, 250, 0, 150)
-				BillboardGui.StudsOffset = Vector3.new(0, 1, 0)
+				BillboardGui.Size = UDim2.new(0, 250, 0, 22)
+				BillboardGui.Enabled = false
+				BillboardGui.StudsOffset = Vector3.new(0, 0, 0)
 				BillboardGui.AlwaysOnTop = true
 				TextLabel.Parent = BillboardGui
 				TextLabel.BackgroundTransparency = 1
-				TextLabel.Position = UDim2.new(0, 0, 0, -50)
-				TextLabel.Size = UDim2.new(0, 250, 0, 100)
+				TextLabel.Position = UDim2.new(0, 0, 0, 0)
+				TextLabel.Size = UDim2.new(1, 0, 1, 0)
 				TextLabel.Font = Enum.Font.SourceSansSemibold
 				TextLabel.TextSize = 20
 				TextLabel.RichText = true
 				TextLabel.TextColor3 = Color3.new(1, 1, 1)
 				TextLabel.TextStrokeTransparency = 0
-				TextLabel.TextYAlignment = Enum.TextYAlignment.Bottom
+				TextLabel.TextYAlignment = Enum.TextYAlignment.Center
 				TextLabel.Text = compactESPText(plr, plr.Character:FindFirstChildOfClass('Humanoid'), '--')
+				registerCompactLabel(plr, ESPholder, BillboardGui, TextLabel)
 				TextLabel.ZIndex = 10
 				local espLoopFunc
 				local teamChange
@@ -5867,23 +6003,157 @@ function round(num, numDecimalPlaces)
 	return math.floor(num * mult + 0.5) / mult
 end
 
+local function compactESPIsAlly(plr)
+    if plr.Team and Players.LocalPlayer.Team and not plr.Neutral and not Players.LocalPlayer.Neutral then
+        return plr.Team == Players.LocalPlayer.Team
+    end
+    return plr.TeamColor == Players.LocalPlayer.TeamColor
+end
 local function compactESPText(plr, humanoid, distance)
+    local color = plr.TeamColor.Color
+    local function channel(value) return math.max(0, math.min(255, math.floor(value * 255 + 0.5))) end
+    local hex = string.format("#%02X%02X%02X", channel(color.R), channel(color.G), channel(color.B))
+    local name = string.sub(plr.Name, 1, 3)
+    if compactESPIsAlly(plr) then return string.format('<font color="%s">%s</font>', hex, name) end
     local health = 0
     if humanoid and humanoid.MaxHealth > 0 then
         health = math.max(0, math.min(100, math.floor(humanoid.Health / humanoid.MaxHealth * 100 + 0.5)))
     end
-    local color = plr.TeamColor.Color
-    local function channel(value) return math.max(0, math.min(255, math.floor(value * 255 + 0.5))) end
-    local hex = string.format("#%02X%02X%02X", channel(color.R), channel(color.G), channel(color.B))
-    local ally
-    if plr.Team and Players.LocalPlayer.Team and not plr.Neutral and not Players.LocalPlayer.Neutral then
-        ally = plr.Team == Players.LocalPlayer.Team
-    else
-        -- Same fallback as Infinite Yield when only TeamColor is available.
-        ally = plr.TeamColor == Players.LocalPlayer.TeamColor
+    local range = type(distance) == "number" and distance >= 1000 and string.format("%.1fk", distance / 1000) or tostring(distance)
+    return string.format('%s | H%d%% | <font color="%s">E</font> | %s st', name, health, hex, range)
+end
+
+-- Shared, screen-space label placement. The original body adornments are untouched.
+if type(IY_COMPACT_LABELS_STOP) == "function" then pcall(IY_COMPACT_LABELS_STOP) end
+local compactLabels = {}
+local layoutConnection, labelCanvas
+local layoutElapsed = 0.08
+local function stopCompactLayout()
+    if layoutConnection then layoutConnection:Disconnect(); layoutConnection = nil end
+    for _, item in pairs(compactLabels) do
+        item.destroyConnection:Disconnect()
     end
-    return string.format('%s | H%d%% | <font color="%s">%s</font> | %s st',
-        string.sub(plr.Name, 1, 3), health, hex, ally and "A" or "E", tostring(distance))
+    compactLabels = {}
+    if labelCanvas then labelCanvas:Destroy(); labelCanvas = nil end
+end
+IY_COMPACT_LABELS_STOP = stopCompactLayout
+
+local function layoutCompactLabels(dt)
+    layoutElapsed = layoutElapsed + dt
+    if layoutElapsed < 0.08 then return end
+    layoutElapsed = 0
+    local camera = workspace.CurrentCamera
+    local root = Players.LocalPlayer.Character and getRoot(Players.LocalPlayer.Character)
+    local visible = {}
+    for plr, item in pairs(compactLabels) do
+        item.billboard.Enabled = false
+        item.line.Visible, item.dot.Visible = false, false
+        local head = item.billboard.Adornee
+        if ESPenabled and camera and root and head and head.Parent then
+            local point, onScreen = camera:WorldToViewportPoint(head.Position)
+            if onScreen and point.Z > 0 then
+                item.x, item.y = point.X, point.Y
+                item.distance = (root.Position - head.Position).Magnitude
+                item.ally = compactESPIsAlly(plr)
+                item.label.TextSize = item.ally and 16 or (item.distance >= 1500 and 16 or 20)
+                local measured = item.label.TextBounds
+                local plain = item.label.Text:gsub("<[^>]+>", "")
+                item.width = math.max(32, math.ceil(measured and measured.X > 0 and measured.X or #plain * item.label.TextSize * 0.6) + 8)
+                item.width = math.min(item.width, math.max(32, camera.ViewportSize.X - 16))
+                table.insert(visible, item)
+            end
+        end
+    end
+    table.sort(visible, function(a, b)
+        if a.ally ~= b.ally then return not a.ally end
+        if a.distance ~= b.distance then return a.distance < b.distance end
+        return a.player.UserId < b.player.UserId
+    end)
+    local occupied = {}
+    for _, item in ipairs(visible) do
+        local w, h = item.width, 22
+        local baseX, baseY = item.x, item.y - 24
+        local chosen
+        local function try(dx, row)
+            local x, y = baseX + dx - w * 0.5, baseY + row * 25 - h * 0.5
+            local top = math.min(110, camera.ViewportSize.Y * 0.18)
+            if x < 8 or x + w > camera.ViewportSize.X - 8 or y < top or y + h > camera.ViewportSize.Y - 20 then return false end
+            for _, rect in ipairs(occupied) do
+                if x < rect.x + rect.w + 6 and x + w + 6 > rect.x and y < rect.y + rect.h + 3 and y + h + 3 > rect.y then return false end
+            end
+            chosen = {x = x, y = y, w = w, h = h, dx = dx, row = row}
+            return true
+        end
+        try(0, 0)
+        if not chosen and item.lastDX then try(item.lastDX, item.lastRow) end
+        if not chosen then
+            for _, column in ipairs({0, -1, 1, -2, 2}) do
+                local dx = column * math.max(w + 14, 220)
+                for step = 0, 32 do
+                    local row = step == 0 and 0 or (step % 2 == 1 and -math.ceil(step / 2) or step / 2)
+                    if try(dx, row) then break end
+                end
+                if chosen then break end
+            end
+        end
+        if chosen then
+            item.lastDX, item.lastRow = chosen.dx, chosen.row
+            table.insert(occupied, chosen)
+            item.billboard.Size = UDim2.new(0, w, 0, h)
+            local cx, cy = chosen.x + w * 0.5, chosen.y + h * 0.5
+            item.billboard.SizeOffset = Vector2.new((cx - item.x) / w, (item.y - cy) / h)
+            item.billboard.Enabled = true
+            local moved = math.abs(chosen.dx) > 1 or chosen.row ~= 0
+            if moved then
+                -- Leader ends at the nearest edge of the moved text's rectangle.
+                local ex = math.max(chosen.x, math.min(chosen.x + w, item.x))
+                local ey = math.max(chosen.y, math.min(chosen.y + h, item.y))
+                local dx, dy = ex - item.x, ey - item.y
+                item.line.Position = UDim2.fromOffset((item.x + ex) * 0.5, (item.y + ey) * 0.5)
+                item.line.Size = UDim2.fromOffset(math.sqrt(dx * dx + dy * dy), 1)
+                item.line.Rotation = math.deg(math.atan2(dy, dx))
+                item.line.BackgroundColor3 = item.player.TeamColor.Color
+                item.line.Visible = true
+                item.dot.Position = UDim2.fromOffset(item.x, item.y)
+                item.dot.BackgroundColor3 = item.player.TeamColor.Color
+                item.dot.Visible = true
+            end
+        end
+        -- If the viewport is truly full, keep the body's boxes and omit the extra
+        -- text rather than forcing another overlapping label into the same space.
+    end
+end
+
+local function registerCompactLabel(plr, holder, billboard, label)
+    if not labelCanvas then
+        labelCanvas = Instance.new("ScreenGui")
+        labelCanvas.Name = "IY_CompactESPLinks"
+        labelCanvas.IgnoreGuiInset = true
+        labelCanvas.ResetOnSpawn = false
+        labelCanvas.Parent = COREGUI
+    end
+    local item = {player = plr, billboard = billboard, label = label}
+    local function marker(name, transparency)
+        local frame = Instance.new("Frame")
+        frame.Name = name
+        frame.AnchorPoint = Vector2.new(0.5, 0.5)
+        frame.BorderSizePixel = 0
+        frame.BackgroundTransparency = transparency
+        frame.Visible = false
+        frame.Parent = labelCanvas
+        return frame
+    end
+    item.line, item.dot = marker("Leader", 0.5), marker("Anchor", 0.1)
+    item.dot.Size = UDim2.fromOffset(3, 3)
+    compactLabels[plr] = item
+    item.destroyConnection = holder.Destroying:Connect(function()
+        if compactLabels[plr] == item then compactLabels[plr] = nil end
+        item.destroyConnection:Disconnect()
+        item.line:Destroy(); item.dot:Destroy()
+        if next(compactLabels) == nil then stopCompactLayout() end
+    end)
+    if not layoutConnection then layoutConnection = RunService.RenderStepped:Connect(layoutCompactLabels) end
+    layoutElapsed = 0.08
 end
 
 function ESP(plr, logic)
@@ -5918,20 +6188,22 @@ function ESP(plr, logic)
 				BillboardGui.Adornee = plr.Character.Head
 				BillboardGui.Name = plr.Name
 				BillboardGui.Parent = ESPholder
-				BillboardGui.Size = UDim2.new(0, 250, 0, 150)
-				BillboardGui.StudsOffset = Vector3.new(0, 1, 0)
+				BillboardGui.Size = UDim2.new(0, 250, 0, 22)
+				BillboardGui.Enabled = false
+				BillboardGui.StudsOffset = Vector3.new(0, 0, 0)
 				BillboardGui.AlwaysOnTop = true
 				TextLabel.Parent = BillboardGui
 				TextLabel.BackgroundTransparency = 1
-				TextLabel.Position = UDim2.new(0, 0, 0, -50)
-				TextLabel.Size = UDim2.new(0, 250, 0, 100)
+				TextLabel.Position = UDim2.new(0, 0, 0, 0)
+				TextLabel.Size = UDim2.new(1, 0, 1, 0)
 				TextLabel.Font = Enum.Font.SourceSansSemibold
 				TextLabel.TextSize = 20
 				TextLabel.RichText = true
 				TextLabel.TextColor3 = Color3.new(1, 1, 1)
 				TextLabel.TextStrokeTransparency = 0
-				TextLabel.TextYAlignment = Enum.TextYAlignment.Bottom
+				TextLabel.TextYAlignment = Enum.TextYAlignment.Center
 				TextLabel.Text = compactESPText(plr, plr.Character:FindFirstChildOfClass('Humanoid'), '--')
+				registerCompactLabel(plr, ESPholder, BillboardGui, TextLabel)
 				TextLabel.ZIndex = 10
 				local espLoopFunc
 				local teamChange

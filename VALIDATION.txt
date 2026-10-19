@@ -1,10 +1,12 @@
 PASS: renderer patch syntax; upstream preserved outside ESP and its command description
 PASS: original body boxes/head billboard/font/stroke/opacity; 3-letter username, H85%, target-team colored E, studs
 PASS: health normalized to MaxHealth, rounded, clamped 0-100%, zero MaxHealth handled
-PASS: short usernames, A/E relation, local team changes, 10 actual team colors shared by letter and boxes
+PASS: allies reduced to team-colored 3-character names, automatic relation changes, 10 team colors shared by enemy letter and boxes
 PASS: original rebuild path, replacement character and live distance updates
 PASS: espteam uses actual team colors; original noesp callback cleanup
 PASS: in-place Infinite Yield upgrade, old callbacks drained before restart, repeated upgrade cleanup, unavailable-global fallback
+PASS: 46 clustered occupants at 3k+ studs, no label overlap, short ally tags, compact ranges, stable slots, leaders, camera pan and crowded small-viewport fallback
+PASS: label coordinator, leader lines and lifecycle connections cleaned up on noesp
 PASS: complete script compiled with official Luau 0.743
-Compiled 13 KLOC into 625 KB bytecode (read 0.00s, parse 0.01s, compile 0.03s)
-Behavior tests: Fengari with mocked Roblox APIs. Full original Infinite Yield compiled but was not executed. Roblox/Xeno/MTC runtime and native rendering were NOT tested.
+Compiled 13 KLOC into 636 KB bytecode (read 0.00s, parse 0.01s, compile 0.04s)
+Behavior/layout checks used Fengari with mocked Roblox APIs. Full original Infinite Yield compiled but was not executed. Native Roblox/Xeno/MTC rendering, actual font metrics, viewport placement and gameplay were NOT tested.

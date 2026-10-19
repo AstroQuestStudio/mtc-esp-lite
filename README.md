@@ -1,25 +1,39 @@
-# Infinite Yield — ESP compact v4
+# Infinite Yield — ESP compact v4.1
 
-Retour au **rendu ESP original d’Infinite Yield** : BoxHandleAdornment sur les parties du personnage, texte au-dessus de la tête, police SourceSansSemibold taille 20 et contour noir. Les cadres écran, onglets et effets de visibilité des versions précédentes ne sont plus chargés.
+Le **rendu des boîtes original d’Infinite Yield** est conservé : BoxHandleAdornment sur les parties du personnage, taille et transparence d’origine, vraies couleurs d’équipe. Les textes restent attachés à la tête mais se répartissent à l’écran pour éviter les superpositions. Police SourceSansSemibold, contour noir, taille 20 pour les ennemis proches et 16 pour les alliés/ennemis à partir de 1 500 studs. Les cadres écran, onglets et effets de visibilité des anciennes versions ne sont pas chargés.
 
 ## Commande
 
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/AstroQuestStudio/mtc-esp-lite/v4.0.0/mtc-esp.client.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/AstroQuestStudio/mtc-esp-lite/v4.1.0/mtc-esp.client.lua"))()
 ```
 
 L’ESP démarre automatiquement. Cette version contient le script Infinite Yield d’origine avec son interface et ses commandes, plus la modification ciblée de son ESP. Il ne s’agit plus de l’interface indépendante MTC Volumes.
 
 ## Texte affiché
 
-`Ast | H85% | E | 240 st`
+**Allié :** `Ast`, uniquement, dans la couleur de son équipe. Pas de santé, de lettre A ou de distance.
+
+**Ennemi proche :** `Ast | H85% | E | 240 st`.
+
+**Ennemi lointain :** `Ast | H85% | E | 3.0k st`.
 
 - **Ast** : les trois premiers caractères du nom de compte Roblox ; un nom plus court est conservé tel quel.
 - **H85%** : santé actuelle divisée par la santé maximale, arrondie et bornée entre 0 et 100 %. Une santé maximale nulle donne 0 %.
-- **A / E** : allié / ennemi. La lettre prend **la couleur réelle de l’équipe du joueur affiché**, identique à celle de ses boîtes : bleu, jaune, vert, rouge, etc. Elle n’est pas forcée au rouge ou au vert. La relation suit Player.Team lorsque les deux joueurs ont une équipe active, avec repli sur la comparaison TeamColor d’Infinite Yield si ces données manquent.
-- **240 st** : distance en studs depuis le personnage local, arrondie vers le bas comme dans l’original.
+- **E** : ennemi. La lettre prend **la couleur réelle de l’équipe du joueur affiché**, identique à celle de ses boîtes : bleu, jaune, vert, rouge, etc. Elle n’est pas forcée au rouge ou au vert. La relation suit Player.Team lorsque les deux joueurs ont une équipe active, avec repli sur la comparaison TeamColor d’Infinite Yield si ces données manquent.
+- **240 st** : distance en studs depuis le personnage local, arrondie vers le bas comme dans l’original en dessous de 1 000 studs. Au-delà, abréviation à une décimale en milliers : `3.0k st`, `3.1k st`, etc. La santé reste affichée pour les ennemis lointains.
 
-Nom, santé, séparateurs et distance restent blancs avec contour noir. Seule la lettre A/E est colorée dans le texte. La zone de texte est élargie à 250 pixels pour contenir le format compact.
+Pour les ennemis, nom, santé, séparateurs et distance restent blancs avec contour noir ; seule la lettre E est colorée. Les alliés n’affichent que leur nom abrégé coloré. La largeur des étiquettes s’adapte à leur contenu.
+
+## Occupants regroupés et textes lointains
+
+Un coordinateur commun projette les têtes à l’écran et cherche des emplacements libres autour d’elles. Les étiquettes sont espacées verticalement puis latéralement si nécessaire. Les emplacements précédents sont réutilisés lorsqu’ils restent libres pour limiter les déplacements inutiles. Un petit point et un trait fin de la couleur d’équipe relient un texte décalé à sa tête d’origine.
+
+Les occupants ne sont jamais fusionnés en un repère de char. Les ennemis ont la priorité dans l’attribution de place, puis les plus proches. Les boîtes restent à leur position réelle et ne sont jamais déplacées par cet ajustement du texte.
+
+La répartition est réévaluée environ 12,5 fois par seconde ; les BillboardGui continuent leur suivi 3D natif entre deux placements. Des chevauchements transitoires peuvent apparaître lors d’un mouvement très rapide avant la mise à jour suivante. Les traits se mettent à jour au rythme du coordinateur. Les dimensions du texte utilisent TextBounds quand disponibles, sinon une estimation prudente.
+
+Si aucun emplacement ne tient dans l’écran, le texte excédentaire est temporairement masqué plutôt que forcé sur un autre texte. **Ses boîtes restent affichées.** Le texte réapparaît lorsque la caméra ou la scène libère de la place. Les têtes hors champ et l’absence du personnage local masquent également les étiquettes.
 
 ## Commandes Infinite Yield conservées
 
@@ -40,7 +54,8 @@ Si l’environnement ne permet pas d’accéder aux fonctions de l’instance d�
 
 - Script complet compilé avec le compilateur officiel Luau 0.743.
 - Vérification que le corps d’Infinite Yield reste identique au dépôt cloné, hors fonction ESP modifiée, son formateur de texte et la description de espteam. Le préambule de remplacement et l’activation automatique sont ajoutés autour de ce corps.
-- Tests Fengari avec API Roblox simulées : rendu d’origine (boîtes, tête, police, contour, transparence), format à trois caractères, santé 0–100 % et MaxHealth nul, noms courts, relation A/E, dix couleurs d’équipe identiques entre lettre et boîtes, respawn, changements d’équipe, distance, espteam, nettoyage noesp, mise à jour d’une instance existante et repli si ses fonctions sont inaccessibles.
+- Tests Fengari avec API Roblox simulées : boîtes d’origine, texte attaché à la tête, police et contour, format à trois caractères, santé 0–100 % et MaxHealth nul, noms courts, relation allié/ennemi, dix couleurs d’équipe identiques entre lettre et boîtes, respawn, changements d’équipe, distance, espteam, nettoyage noesp, mise à jour d’une instance existante et repli si ses fonctions sont inaccessibles.
+- Scénario de congestion : 46 occupants à plus de 3 000 studs au même endroit à l’écran, textes sans intersection, places stables à caméra immobile, noms alliés raccourcis, distances abrégées, traits de liaison, déplacement de caméra et écran trop petit. Les boîtes sont conservées quand un texte ne tient pas. Nettoyage du coordinateur et des traits après noesp.
 
 **Pas de test dans Roblox, Xeno ou MTC depuis cet environnement.** La compilation et les tests simulés ne valident pas le rendu réel ni toutes les fonctions d’Infinite Yield. La détection des camps repose sur les équipes Roblox et le comportement de repli décrit ci-dessus, sans connaissance des factions propres à MTC. Aucun état de visibilité ou de pénétration n’est affiché. Les autres fonctions d’Infinite Yield restent celles du dépôt d’origine et n’ont pas été exécutées pour ces tests.
 
